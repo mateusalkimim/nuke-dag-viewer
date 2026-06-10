@@ -1,35 +1,40 @@
-# map_inputs_gui.py (v3)
+# map_inputs_gui.py (v4)
 # Uso: abra o Nuke normalmente (GUI), abra o Script Editor, cole este
 # arquivo inteiro e rode (Ctrl+Enter).
 #
-# Mede a ARIDADE DEFAULT DE SERIALIZACAO de cada classe — o numero de
-# inputs conectados para o qual o Nuke OMITE o knob "inputs" ao gravar
-# o script. E' o valor que a tabela NK_INPUTS do viewer assume quando o
-# .nk nao traz o knob.
+# Mede a ARIDADE DEFAULT por classe: quantos itens da pilha o PASTE do
+# Nuke consome quando o bloco .nk NAO traz o knob "inputs". E' exatamente
+# a pergunta que o parser do viewer (parseNK) precisa responder.
 #
 # LICAO DA v1: copiar um NODE SOZINHO nao e' oraculo — o Nuke
 # especial-casa a copia de no unico (liga o input 0 ao $cut_paste_input
-# e omite o knob mesmo desconectado). O oraculo valido e' a selecao
-# MULTI-NO, onde o serializador precisa de contagens exatas de pop.
+# e omite o knob mesmo desconectado).
 #
 # LICAO DA v2: o codigo colado no Script Editor roda nos globals do
-# __main__, COMPARTILHADOS com callbacks do pipeline (knobChanged/
-# onCreate disparam a cada setSelected/createNode da sonda). Um callback
-# que atribui a nomes comuns ("default", "n"...) sobrescreve as
-# variaveis do script no meio da run — na v2 isso poluiu o resultado com
-# um objeto Knob (TypeError no json.dump). Por isso TODO o trabalho vive
-# dentro de uma funcao: locals sao imunes a poluicao de globals.
+# __main__, compartilhados com callbacks do pipeline; um callback que
+# atribui a nomes comuns sobrescreve variaveis do script no meio da run.
+# Por isso todo o trabalho vive dentro de uma funcao (locals sao imunes).
 #
-# Metodo: para cada classe, cria o node + 1 Dot decoy (nunca conectado,
-# so para forcar copia multi-no). Para k = 0,1,2,...: conecta k Dots,
-# seleciona node+decoy+dots, nuke.nodeCopy(arquivo), e procura a linha
-# " inputs N" NO BLOCO DO NODE SONDADO (identificado pelo knob name).
-# Primeiro k em que a linha some = aridade default.
+# LICAO DA v3: sondar o lado do SERIALIZADOR (quando o nodeCopy escreve
+# ou omite o knob) e' nao-confiavel mesmo em selecao multi-no — o
+# serializador aplica regras de UX/ordem de emissao proprias (as 8
+# ancoras falharam com o mesmo padrao da v1 mesmo com decoy na selecao).
+# O oraculo correto e' o lado do PASTE: construir um snippet sintetico
+# com lastro de Dots na pilha + o bloco da classe SEM o knob "inputs",
+# colar com nuke.nodePaste e CONTAR quantos Dots o no consumiu. O paste
+# e' deterministico e e' a semantica que o parser imita.
+#
+# Metodo v4, por classe:
+#   1. cria o node, serializa so ele (nodeCopy), extrai o bloco e REMOVE
+#      as linhas " inputs N" de nivel superior; deleta o node.
+#   2. monta snippet: 6 Dots com "inputs 0" (ficam empilhados) + bloco.
+#   3. deseleciona tudo, nuke.nodePaste(snippet).
+#   4. aridade default = numero de inputs conectados do no colado.
+#   5. deleta os nos colados.
 #
 # Saida: inputs_default.json  {classe: default}
-#   - null = nunca omitiu ate o teto -> aridade variavel (Switch,
-#     Scene...); o Nuke sempre serializa "inputs" nesses e a NK_INPUTS
-#     os exclui de proposito.
+#   - null = consumiu o lastro inteiro (>= 6) — aridade variavel/enorme;
+#     a NK_INPUTS exclui essas classes de proposito.
 # No final roda autovalidacao com classes de verdade conhecida (anchors)
 # e imprime PASS/FAIL — se falhar, o metodo quebrou de novo: nao use o
 # JSON.
@@ -38,16 +43,19 @@ import nuke, json, os, re, tempfile
 
 def _nkprobe_main():
     OUT = r"C:\Users\matte\Downloads\Scripts\nuke-dag-viewer\data\inputs_default.json"  # ajuste para o seu ambiente
-    TMP = os.path.join(tempfile.gettempdir(), "nk_probe.nk")
-    PROBE_CAP = 4  # maior default da NK_INPUTS atual e' 3 (Keymix, IBKGizmoV3)
+    TMP_COPY = os.path.join(tempfile.gettempdir(), "nk_probe_copy.nk")
+    TMP_PASTE = os.path.join(tempfile.gettempdir(), "nk_probe_paste.nk")
+    N_DOTS = 6  # lastro; maior default conhecido e' 3 (Keymix, IBKGizmoV3)
 
     # Menu Image>Read usa nukescripts.create_read() (sem "createNode" no
     # comando), por isso Read nunca apareceu nos dumps de menu.
     extra_classes = {"Read"}
 
-    # verdade conhecida (paste real / uso diario) para autovalidar o metodo
+    # verdade conhecida (paste real / uso diario) para autovalidar o
+    # metodo. Switch ficou de fora: e' classe de aridade variavel e seu
+    # comportamento de paste sem knob e' justamente o que vamos MEDIR.
     anchors = {"Constant": 0, "Blur": 1, "Grade": 1, "Merge2": 2,
-               "ChannelMerge": 2, "Keymix": 3, "Roto": 1, "Switch": None}
+               "ChannelMerge": 2, "Keymix": 3, "Roto": 1}
 
     inputs_re = re.compile(r"^ inputs (\d+)$")
     name_re = re.compile(r"^ name (\S+)$")
@@ -81,96 +89,119 @@ def _nkprobe_main():
         for s in nuke.selectedNodes():
             s.setSelected(False)
 
-    def select_only(nodes):
-        deselect_all()
-        for x in nodes:
-            x.setSelected(True)
-
-    def target_has_inputs_knob(probe_name):
-        """Serializa a selecao atual; True/False se o bloco cujo knob
-        name == probe_name tem linha ' inputs N'; None se nao achar."""
-        if os.path.exists(TMP):
-            os.remove(TMP)
-        nuke.nodeCopy(TMP)
+    def extract_block_sans_inputs(path, probe_name):
+        """Devolve as linhas do bloco cujo knob name == probe_name, com
+        as linhas ' inputs N' de nivel superior removidas; None se o
+        bloco nao for achado."""
         in_block = False
         depth = 0
-        cur_inputs = False
+        cur = []
         cur_is_target = False
-        with open(TMP, encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             for raw in f:
                 line = raw.rstrip("\r\n")
                 if not in_block:
                     if hdr_re.match(line):
                         in_block = True
                         depth = line.count("{") - line.count("}")
-                        cur_inputs = False
+                        cur = [line]
                         cur_is_target = False
                     continue
+                drop = False
                 if depth == 1:  # knobs de nivel superior do bloco
                     if inputs_re.match(line):
-                        cur_inputs = True
+                        drop = True
                     m = name_re.match(line)
                     if m and m.group(1) == probe_name:
                         cur_is_target = True
+                if not drop:
+                    cur.append(line)
                 depth += line.count("{") - line.count("}")
                 if depth <= 0:
                     in_block = False
                     if cur_is_target:
-                        return cur_inputs
+                        return cur
         return None
 
     res = {}
     skipped = []
     for cls in sorted(classes):
+        # --- passo 1: bloco serializado da classe, sem o knob inputs ---
         deselect_all()  # evita auto-conexao do createNode com a selecao
         try:
             n = nuke.createNode(cls, inpanel=False)
         except Exception as e:
             skipped.append("%s: %s" % (cls, e))
             continue
-        dots = []
+        block = None
+        real_cls = cls
         try:
             try:
                 n.setName("NKPROBE_TARGET")
             except Exception:
                 pass
             probe_name = n.name()  # nome real (rename pode colidir/falhar)
+            real_cls = n.Class()
             for i in range(n.inputs()):
                 n.setInput(i, None)
-            decoy = nuke.nodes.Dot()  # nunca conectado: forca copia multi-no
-            dots.append(decoy)
-            cap = PROBE_CAP
-            try:
-                cap = min(cap, int(n.maxInputs()))
-            except Exception:
-                pass
-            default = None
-            for k in range(0, cap + 1):
-                if k > 0:
-                    d = nuke.nodes.Dot()
-                    dots.append(d)
-                    if not n.setInput(k - 1, d):
-                        break  # classe nao aceita o indice: para de sondar
-                select_only([n] + dots)
-                has = target_has_inputs_knob(probe_name)
-                if has is None:
-                    raise RuntimeError("bloco do node nao achado na serializacao")
-                if not has:
-                    default = k
-                    break
-            res[n.Class()] = default
+            deselect_all()
+            n.setSelected(True)
+            if os.path.exists(TMP_COPY):
+                os.remove(TMP_COPY)
+            nuke.nodeCopy(TMP_COPY)
+            block = extract_block_sans_inputs(TMP_COPY, probe_name)
         except Exception as e:
             skipped.append("%s: %s" % (cls, e))
         finally:
-            for d in dots:
-                try:
-                    nuke.delete(d)
-                except Exception:
-                    pass
             try:
                 nuke.delete(n)
             except Exception:
                 pass
+        if block is None:
+            if not any(s.startswith(cls + ":") for s in skipped):
+                skipped.append("%s: bloco nao achado na serializacao" % cls)
+            continue
+
+        # --- passo 2: snippet com lastro de Dots + bloco sem knob ---
+        snippet = []
+        for j in range(N_DOTS):
+            snippet.append("Dot {")
+            snippet.append(" inputs 0")
+            snippet.append(" name NKPROBE_D%d" % j)
+            snippet.append("}")
+        snippet.extend(block)
+        with open(TMP_PASTE, "w", encoding="utf-8") as f:
+            f.write("\n".join(snippet) + "\n")
+
+        # --- passos 3-5: paste, contagem dos inputs, limpeza ---
+        deselect_all()
+        pasted = []
+        try:
+            nuke.nodePaste(TMP_PASTE)
+            pasted = list(nuke.selectedNodes())
+            target = nuke.toNode(probe_name)
+            if target is None:
+                raise RuntimeError("no colado nao achado pelo nome")
+            connected = 0
+            for i in range(N_DOTS + 2):
+                try:
+                    if target.input(i) is not None:
+                        connected += 1
+                except Exception:
+                    break
+            res[real_cls] = None if connected >= N_DOTS else connected
+        except Exception as e:
+            skipped.append("%s: %s" % (cls, e))
+        finally:
+            seen = set()
+            for p in pasted + [nuke.toNode(probe_name)]:
+                if p is None or id(p) in seen:
+                    continue
+                seen.add(id(p))
+                try:
+                    nuke.delete(p)
+                except Exception:
+                    pass
 
     # tripwire contra poluicao de estado (a v2 caiu exatamente nisso):
     # todo valor precisa ser int ou None ANTES de tentar escrever
@@ -196,7 +227,7 @@ def _nkprobe_main():
     var = sum(1 for v in res.values() if v is None)
     print("ok: %d classes, %d bytes -> %s"
           % (len(res), os.path.getsize(OUT), OUT))
-    print("  default fixo: %d | variavel/indeterminado (null): %d" % (fixed, var))
+    print("  default fixo: %d | variavel/lastro esgotado (null): %d" % (fixed, var))
 
     fails = 0
     for cls, exp in sorted(anchors.items()):
