@@ -46,6 +46,7 @@ Três saídas do mesmo JSON, mais uma entrada:
 | **Grafo SVG interativo** | zoom no cursor, pan, `F` = enquadrar |
 | **Snippet `.nk`** | colável de volta no Nuke |
 | **Tabela textual** | 1 linha por nó, inputs explícitos |
+| **Feedback LLM** | JSON estruturado de erros/avisos do último import/render |
 | **Import `.nk`** ⟶ | parser de semântica de pilha → JSON → render |
 
 ## Princípios
@@ -108,6 +109,26 @@ convenção invertida; cópia de nó único não é oráculo de serialização; 
 errada não gera erro, gera grafo plausível e errado) estão documentadas em
 [`docs/contexto.md`](docs/contexto.md). É tanto referência técnica quanto um
 diário de "como saber se isto é verdade ou artefato".
+
+## Geração de `.nk` por LLM
+
+Há um workstream paralelo para ensinar um LLM a **gerar** `.nk` válido usando o
+catálogo medido do projeto — com o viewer atuando como motor de layout e
+validador no loop de correção. O material vive em [`llm/`](llm/):
+
+- [`mvp_subset.json`](llm/) — referência curada de 33 classes (~80% de comp,
+  ~2k tokens, cabe inline num prompt), gerada por `build_mvp_subset.py` e
+  **validada contra o catálogo real** (classe/knob inexistente aborta com
+  did-you-mean).
+- **Feedback estruturado** — o botão **Feedback LLM** no header devolve um JSON
+  `{ok, stage, errors, warnings}` do último import/render, com sugestões por
+  proximidade (classe e knob) e a lista de knobs válidos da classe que falhou.
+  É o protocolo de correção: gerar → colar no viewer → copiar feedback → colar
+  de volta no modelo.
+
+Decisões do dialeto (conexões sempre explícitas, modelo não gera posições,
+bloco único, JSON canônico como entrada de refino) e o schema completo do
+feedback em [`llm/README.md`](llm/README.md).
 
 ## Compatibilidade
 
