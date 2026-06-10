@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Nuke DAG Viewer — JSON → grafo · .nk · tabela</title>
+<style>
+  :root{
+    --bg:#262626; --panel:#1f1f1f; --panel2:#2b2b2b; --line:#3a3a3a;
+    --txt:#d8d8d4; --dim:#8f8f8a; --accent:#f5a623; --err:#ff5c5c;
+    --mono:ui-monospace,'Cascadia Mono','JetBrains Mono',Menlo,Consolas,monospace;
+    --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; overflow:hidden}
+  body{background:var(--bg); color:var(--txt); font-family:var(--sans); font-size:13px;
+       display:flex; flex-direction:column}
+
+  /* ---------- header ---------- */
+  header{display:flex; align-items:center; gap:8px; padding:8px 12px;
+         background:var(--panel); border-bottom:1px solid #141414; flex-wrap:wrap}
+  header .logo{width:14px; height:14px; background:var(--accent); border-radius:2px;
+               box-shadow:0 0 0 2px #00000055 inset}
+  header h1{font-size:13px; font-weight:600; letter-spacing:.4px; margin-right:auto}
+  header h1 span{color:var(--dim); font-weight:400}
+  button{font-family:var(--sans); font-size:12px; color:var(--txt);
+         background:var(--panel2); border:1px solid #454545; border-radius:4px;
+         padding:5px 11px; cursor:pointer; transition:background .12s, border-color .12s}
+  button:hover{background:#383838; border-color:#5a5a5a}
+  button:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+  button.primary{background:var(--accent); color:#1a1a1a; font-weight:600; border-color:#c07f12}
+  button.primary:hover{background:#ffb840}
+  button[aria-pressed="true"]{border-color:var(--accent); color:var(--accent)}
+
+  /* ---------- layout ---------- */
+  main{flex:1; display:flex; min-height:0; position:relative}
+  #jsonPanel{width:330px; min-width:330px; background:var(--panel); border-right:1px solid #141414;
+             display:flex; flex-direction:column; padding:10px; gap:8px}
+  #jsonPanel.hidden{display:none}
+  #jsonPanel label{font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.8px}
+  #jsonInput{flex:1; resize:none; background:#161616; color:#cfe3cf; border:1px solid #3c3c3c;
+             border-radius:4px; padding:8px; font-family:var(--mono); font-size:11px;
+             line-height:1.45; tab-size:2; white-space:pre}
+  #jsonInput:focus{outline:1px solid var(--accent)}
+  #nkInput{height:118px; resize:vertical; background:#161616; color:#d8cfa8; border:1px solid #3c3c3c;
+           border-radius:4px; padding:8px; font-family:var(--mono); font-size:11px;
+           line-height:1.45; white-space:pre}
+  #nkInput:focus{outline:1px solid var(--accent)}
+  #errors li.warn{color:#ffd98a}
+  #errors code{font-family:var(--mono); color:#ffe9c0}
+  #nodesFile{font-size:11px; color:var(--dim)}
+  #nodesFile::file-selector-button{font-family:var(--sans); font-size:11px; color:var(--txt);
+    background:var(--panel2); border:1px solid #454545; border-radius:4px; padding:3px 9px; cursor:pointer}
+  #nodesStatus{font-size:10.5px; color:var(--dim); font-style:italic; line-height:1.4}
+
+  #canvasWrap{flex:1; position:relative; min-width:0}
+  svg{position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:grab; display:block}
+  svg.panning{cursor:grabbing}
+
+  #zoomCtrl{position:absolute; right:12px; bottom:12px; display:flex; flex-direction:column; gap:6px}
+  #zoomCtrl button{width:34px; height:34px; font-size:16px; padding:0}
+
+  /* ---------- errors ---------- */
+  #errors{display:none; background:#3a1414; border-bottom:1px solid #5c1f1f; padding:8px 14px;
+          font-family:var(--mono); font-size:11px; color:#ffb3b3; max-height:110px; overflow:auto}
+  #errors.show{display:block}
+  #errors li{margin-left:16px; line-height:1.6}
+  #errors strong{color:var(--err)}
+
+  /* ---------- inspector ---------- */
+  #inspector{position:absolute; top:10px; right:10px; width:272px; max-height:calc(100% - 20px);
+             overflow:auto; background:#222222f2; border:1px solid #444; border-radius:6px;
+             box-shadow:0 6px 24px #000a; display:none; z-index:5}
+  #inspector.show{display:block}
+  #inspector .head{display:flex; align-items:center; gap:8px; padding:9px 10px;
+                   border-bottom:1px solid #3a3a3a}
+  #inspector .chip{width:11px; height:11px; border-radius:2px; flex:none}
+  #inspector .head b{font-size:13px; word-break:break-all}
+  #inspector .head .cls{color:var(--dim); font-size:11px; margin-left:auto; white-space:nowrap}
+  #inspector .head button{padding:1px 7px; margin-left:6px}
+  #inspector section{padding:8px 10px; border-bottom:1px solid #303030}
+  #inspector section:last-child{border-bottom:0}
+  #inspector h3{font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.8px; margin-bottom:6px}
+  #inspector table{width:100%; border-collapse:collapse; font-family:var(--mono); font-size:11px}
+  #inspector td{padding:2px 4px; vertical-align:top; word-break:break-all}
+  #inspector td:first-child{color:#e8b15c; white-space:nowrap; padding-right:8px}
+  #inspector .note{font-size:12px; color:#b9c9a8; font-style:italic}
+  #inspector .empty{color:var(--dim); font-style:italic; font-size:11px}
+
+  /* ---------- output drawer ---------- */
+  #drawer{display:none; flex-direction:column; background:var(--panel); border-top:1px solid #141414;
+          height:240px; min-height:120px}
+  #drawer.show{display:flex}
+  #drawer .bar{display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid #2e2e2e}
+  #drawer .bar b{font-size:12px}
+  #drawer .bar .spacer{flex:1}
+  #drawerOut{flex:1; overflow:auto; margin:0; padding:10px 14px; font-family:var(--mono);
+             font-size:11px; line-height:1.5; color:#cfd8cf; white-space:pre; user-select:text}
+
+  /* ---------- SVG node styles ---------- */
+  .chk{display:flex; gap:7px; align-items:center; font-size:11.5px; color:var(--txt);
+       text-transform:none !important; letter-spacing:0 !important; cursor:pointer; user-select:none}
+  .chk input{accent-color:var(--accent)}
+  .node{cursor:pointer}
+  .node .body{stroke:#121212; stroke-width:1.2}
+  .node.selected .body{stroke:var(--accent); stroke-width:2.2}
+  .node.err .body{stroke:var(--err); stroke-width:2; stroke-dasharray:5 3}
+  .node.new .body{stroke:#ffd24d; stroke-width:2.4; animation:pulse 1.15s ease-in-out infinite}
+  @keyframes pulse{0%,100%{stroke-opacity:1; stroke-width:2.4} 50%{stroke-opacity:.2; stroke-width:4.5}}
+  @media (prefers-reduced-motion: reduce){
+    .node.new .body{animation:none; stroke:#ffd24d; stroke-width:3}
+  }
+  .dotName{font:8.5px var(--sans); fill:var(--dim); pointer-events:none}
+  .edge{stroke:#9a9a93; stroke-width:1.6; fill:none}
+  .edge.mask{stroke:#a98fc6; stroke-dasharray:6 4}
+  .pipeBadge circle{fill:#1d1d1d; stroke:#9a9a93; stroke-width:1}
+  .pipeBadge.missing circle{stroke:var(--err); fill:#3a1414}
+  .pipeBadge text{fill:#e8e8e2; font:700 9px var(--sans)}
+  .pipeBadge.missing text{fill:var(--err)}
+  .bdrop rect{fill:#ffffff10; stroke:#ffffff26; stroke-width:1; rx:6}
+  .bdrop text{fill:#cfcfc7; font:600 12px var(--sans)}
+  .nodeName{font:600 11.5px var(--sans); pointer-events:none}
+  .nodeSub{font:italic 9.5px var(--sans); pointer-events:none}
+  .errBadge{fill:var(--err); font:700 12px var(--sans); pointer-events:none}
+
+  /* ---------- mobile ---------- */
+  @media (max-width:760px){
+    #jsonPanel{position:absolute; z-index:8; inset:0 auto 0 0; width:min(330px,88vw); box-shadow:4px 0 20px #000b}
+    #inspector{width:min(272px,80vw)}
+    #drawer{height:45%}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo" aria-hidden="true"></div>
+  <h1>Nuke DAG Viewer <span>· JSON → grafo · .nk · tabela</span></h1>
+  <button id="btnJson" aria-pressed="true">JSON</button>
+  <button id="btnNk">Exportar .nk</button>
+  <button id="btnTable">Tabela</button>
+  <button id="btnFit" title="Enquadrar o grafo">Enquadrar</button>
+</header>
+
+<ul id="errors" role="alert"></ul>
+
+<main>
+  <aside id="jsonPanel">
+    <label for="jsonInput">JSON canônico do setup</label>
+    <textarea id="jsonInput" spellcheck="false" aria-label="JSON do setup"></textarea>
+    <button id="btnRender" class="primary">Renderizar</button>
+    <label for="nkInput" style="margin-top:6px">Importar do clipboard do Nuke (.nk)</label>
+    <textarea id="nkInput" spellcheck="false" aria-label="Snippet .nk para importar"
+      placeholder="cole aqui o conteúdo copiado do Nuke:&#10;set cut_paste_input [stack 0]&#10;version 14.0 v1&#10;Read { … }"></textarea>
+    <label class="chk"><input type="checkbox" id="chkDots"> Colapsar Dots (roteamento puro)</label>
+    <label class="chk"><input type="checkbox" id="chkPos" checked> Usar posições originais (xpos/ypos)</label>
+    <button id="btnImport">Importar .nk → JSON</button>
+    <label for="nodesFile" style="margin-top:6px">Tabela de nodes (nodes.json do seu Nuke)</label>
+    <input type="file" id="nodesFile" accept=".json,application/json,text/plain">
+    <div id="nodesStatus">usando tabela embutida (~180 classes padrão)</div>
+  </aside>
+
+  <div id="canvasWrap">
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Grafo de nós estilo Nuke">
+      <defs>
+        <pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse">
+          <circle cx="1.2" cy="1.2" r="1.2" fill="#3a3a3a"/>
+        </pattern>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#9a9a93"/>
+        </marker>
+        <marker id="arrowMask" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#a98fc6"/>
+        </marker>
+      </defs>
+      <rect id="gridRect" x="-100000" y="-100000" width="200000" height="200000" fill="url(#grid)"/>
+      <g id="world"></g>
+    </svg>
+    <div id="zoomCtrl">
+      <button id="zin" aria-label="Aproximar">+</button>
+      <button id="zout" aria-label="Afastar">−</button>
+    </div>
+    <aside id="inspector" aria-live="polite"></aside>
+  </div>
+</main>
+
+<div id="drawer">
+  <div class="bar">
+    <b id="drawerTitle">Saída</b>
+    <div class="spacer"></div>
+    <button id="btnCopy">Copiar</button>
+    <button id="btnCloseDrawer">Fechar</button>
+  </div>
+  <pre id="drawerOut"></pre>
+</div>
+
+<script>
+'use strict';
+
+/* ================= cores por classe (convenção Nuke) ================= */
+const COLOR_RULES = [
+  [/merge|keymix|dissolve|switch/i,                                  '#d98a2b'], // laranja
+  [/expression/i,                                                    '#2fa890'], // verde-água
+  [/grade|colorcorrect|invert|saturat|hue|gamma|multiply|colorspace|gain|clamp|color/i, '#4d7ab5'], // azul
+  [/shuffle|copy(?!cat)|channel|remove|add(?!mix)/i,                 '#8a2f2f'], // vermelho-escuro
+  [/blur|defocus|erode|dilate|filter|median|sharpen|soften|edge/i,   '#7a4f9e'], // roxo
+  [/read|constant|checkerboard|plate/i,                              '#6b6b6b'], // cinza
+];
+const colorFor = cls => (COLOR_RULES.find(([re]) => re.test(cls)) || [0,'#555555'])[1];
+const textColorFor = hex => {
+  const n = parseInt(hex.slice(1),16);
+  const L = .2126*(n>>16&255) + .7152*(n>>8&255) + .0722*(n&255);
+  return L > 150 ? '#161616' : '#f2f2ec';
+};
+
+/* ================= medidas ================= */
+const measCtx = document.createElement('canvas').getContext('2d');
+function nodeWidth(name){
+  measCtx.font = '600 11.5px "Segoe UI", system-ui, sans-serif';
+  return Math.max(118, Math.ceil(measCtx.measureText(name).width) + 30);
+}
+const NODE_H = 36, ROW_GAP = 112, COL_GAP = 46;
+
+/* ================= validação ================= */
+const isMergeClass = cls => /merge|keymix/i.test(cls);
+const ALLOWED_KEYS = new Set(['A','B','mask','input']);
+
+function validate(data){
+  const errors = [];
+  const E = (m) => errors.push(m);
+  if (!data || typeof data !== 'object') { E('JSON raiz deve ser um objeto.'); return {nodes:new Map(), order:[], backdrops:[], errors, warnings:[]}; }
+  const list = Array.isArray(data.nodes) ? data.nodes : (E('Campo "nodes" ausente ou não é array.'), []);
+  const nodes = new Map();
+
+  for (const raw of list){
+    if (!raw || typeof raw !== 'object'){ E('Entrada de nó inválida (não é objeto).'); continue; }
+    const name = String(raw.name||'').trim();
+    if (!name){ E('Nó sem "name".'); continue; }
+    if (nodes.has(name)){ E(`Nome duplicado: <strong>${esc(name)}</strong>.`); continue; }
+    const cls = String(raw.class||'').trim();
+    if (!cls) E(`Nó <strong>${esc(name)}</strong> sem "class".`);
+    const node = { name, cls: cls||'?', knobs: raw.knobs && typeof raw.knobs==='object' ? raw.knobs : {},
+                   inputs: {}, note: raw.note ? String(raw.note) : '', invalid:false,
+                   pos: (Array.isArray(raw.pos) && raw.pos.length===2 && raw.pos.every(v=>Number.isFinite(Number(v))))
+                        ? raw.pos.map(Number) : null };
+    const ins = raw.inputs && typeof raw.inputs==='object' ? raw.inputs : {};
+    for (const k of Object.keys(ins)){
+      if (!ALLOWED_KEYS.has(k)){ E(`<strong>${esc(name)}</strong>: chave de input desconhecida "${esc(k)}" (use A, B, mask ou input).`); node.invalid=true; continue; }
+      node.inputs[k] = String(ins[k]);
+    }
+    if (node.inputs.input && (node.inputs.A || node.inputs.B)){
+      E(`<strong>${esc(name)}</strong>: misturou "input" com A/B — escolha um esquema.`); node.invalid=true;
+    }
+    nodes.set(name, node);
+  }
+
+  // referências e regra A/B
+  for (const node of nodes.values()){
+    for (const [k,ref] of Object.entries(node.inputs)){
+      if (!nodes.has(ref)){
+        E(`<strong>${esc(node.name)}</strong>: input ${k} aponta para nó inexistente "${esc(ref)}".`);
+        node.invalid = true; node.inputs[k] = null; node['missing_'+k] = ref;
+      }
+    }
+    const hasA = !!node.inputs.A, hasB = !!node.inputs.B;
+    if (isMergeClass(node.cls) && !(hasA && hasB)){
+      E(`<strong>${esc(node.name)}</strong> (${esc(node.cls)}): Merge exige A <em>e</em> B declarados — ${!hasA?'falta A':''}${!hasA&&!hasB?' e ':''}${!hasB?'falta B':''}.`);
+      node.invalid = true;
+    } else if ((hasA !== hasB) && (hasA || hasB)){
+      E(`<strong>${esc(node.name)}</strong>: declarou só ${hasA?'A':'B'} — pipes A/B devem vir em par.`);
+      node.invalid = true;
+    }
+  }
+
+  // backdrops
+  const backdrops = [];
+  for (const raw of (Array.isArray(data.backdrops)?data.backdrops:[])){
+    if (!raw || typeof raw !== 'object') continue;
+    const contains = (Array.isArray(raw.contains)?raw.contains:[]).filter(n=>{
+      if (!nodes.has(n)){ E(`Backdrop "${esc(String(raw.label||''))}": nó "${esc(String(n))}" não existe.`); return false; }
+      return true;
+    });
+    backdrops.push({ label:String(raw.label||''), contains });
+  }
+
+  // ciclos + ordem topológica (Kahn, estável)
+  const indeg = new Map(), children = new Map();
+  for (const n of nodes.values()){ indeg.set(n.name,0); children.set(n.name,[]); }
+  for (const n of nodes.values())
+    for (const ref of Object.values(n.inputs)) if (ref){
+      indeg.set(n.name, indeg.get(n.name)+1);
+      children.get(ref).push(n.name);
+    }
+  const order = [];
+  let queue = [...nodes.values()].filter(n=>indeg.get(n.name)===0).map(n=>n.name);
+  while (queue.length){
+    const name = queue.shift();
+    order.push(name);
+    for (const c of children.get(name)){
+      indeg.set(c, indeg.get(c)-1);
+      if (indeg.get(c)===0) queue.push(c);
+    }
+  }
+  if (order.length < nodes.size){
+    const cyc = [...nodes.keys()].filter(n=>!order.includes(n));
+    E(`Ciclo detectado envolvendo: <strong>${cyc.map(esc).join(', ')}</strong>.`);
+    for (const n of cyc){ nodes.get(n).invalid = true; order.push(n); }
+  }
+
+  // valida nomes de knobs contra a tabela do Nuke do usuário (se carregada)
+  const warnings = [];
+  if (NK_USER){
+    for (const node of nodes.values()){
+      const u = NK_USER.get(node.cls);
+      if (!u?.knobs) continue;
+      for (const k of Object.keys(node.knobs)){
+        const real = node.cls === 'Expression' ? (EXPR_MAP[k] || k) : k;
+        if (!u.knobs.has(real))
+          warnings.push(`<strong>${esc(node.name)}</strong>: knob "${esc(k)}" não existe em ${esc(node.cls)} no seu Nuke.`);
+      }
+    }
+  }
+  return { nodes, order, backdrops, errors, warnings };
+}
+
+/* ================= layout (top-down) ================= */
+function layout(model){
+  const { nodes, order } = model;
+  const layer = new Map();
+  for (const name of order){
+    const n = nodes.get(name);
+    let L = 0;
+    for (const ref of Object.values(n.inputs))
+      if (ref && layer.has(ref)) L = Math.max(L, layer.get(ref)+1);
+    layer.set(name, L);
+  }
+  const byLayer = [];
+  for (const name of order){
+    const L = layer.get(name);
+    (byLayer[L] = byLayer[L] || []).push(name);
+  }
+  let cursor = 0;
+  for (let L=0; L<byLayer.length; L++){
+    const row = byLayer[L].map(name=>{
+      const n = nodes.get(name);
+      let desired = null;
+      if (n.inputs.B && nodes.get(n.inputs.B)?.x != null)         // tronco vertical segue o pipe B
+        desired = nodes.get(n.inputs.B).x;
+      else {
+        const px = Object.entries(n.inputs)
+          .filter(([k,r])=>k!=='mask' && r && nodes.get(r)?.x!=null)
+          .map(([,r])=>nodes.get(r).x);
+        if (px.length) desired = px.reduce((a,b)=>a+b,0)/px.length;
+      }
+      if (desired === null) desired = (cursor += 240) - 240;
+      return { name, desired, w: nodeWidth(name) };
+    });
+    row.sort((a,b)=>a.desired-b.desired);
+    let minX = -Infinity;
+    for (const item of row){
+      let x = Math.max(item.desired, minX);
+      const n = nodes.get(item.name);
+      n.x = x; n.y = L*ROW_GAP; n.w = item.w; n.h = NODE_H;
+      minX = x + item.w + COL_GAP; // x é o centro; espaçamento conservador
+    }
+  }
+  // overrides: "pos" é a âncora do Nuke (canto sup. esq.; nó 80×18, Dot 12×12).
+  // Converte para o nosso centro de desenho, alinhando os CENTROS — assim a
+  // geometria do grafo bate 1:1 com o DAG do Nuke.
+  for (const n of nodes.values()){
+    if (n.cls === 'Dot'){ n.w = 26; n.h = 20; }
+    if (n.pos){
+      const NW = n.cls === 'Dot' ? 12 : 80, NH = n.cls === 'Dot' ? 12 : 18;
+      n.x = n.pos[0] + NW/2;
+      n.y = n.pos[1] + NH/2 - n.h/2;
+    }
+  }
+  // x é tratado como CENTRO do nó em todo o código de render
+}
+
+/* ================= render SVG ================= */
+const svg = document.getElementById('svg');
+const world = document.getElementById('world');
+const SVGNS = 'http://www.w3.org/2000/svg';
+let MODEL = null, selected = null, lastNames = null;
+let view = { s: 1, tx: 60, ty: 60 };
+
+const el = (tag, attrs={}, parent) => {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const [k,v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function applyView(){
+  world.setAttribute('transform', `translate(${view.tx} ${view.ty}) scale(${view.s})`);
+}
+
+function entryPoints(n){
+  // pontos de entrada (em coordenadas de mundo); n.x = centro
+  return {
+    A:     { x: n.x + 22, y: n.y },
+    B:     { x: n.x - 14, y: n.y },
+    input: { x: n.x,      y: n.y },
+    mask:  { x: n.x + n.w/2, y: n.y + n.h/2 },
+  };
+}
+
+function render(model, newSet){
+  world.innerHTML = '';
+  const gB = el('g', {}, world), gE = el('g', {}, world), gN = el('g', {}, world);
+  const { nodes, backdrops } = model;
+
+  /* backdrops */
+  for (const bd of backdrops){
+    const xs=[], ys=[], xe=[], ye=[];
+    for (const name of bd.contains){
+      const n = nodes.get(name); if (n?.x==null) continue;
+      xs.push(n.x-n.w/2); xe.push(n.x+n.w/2); ys.push(n.y); ye.push(n.y+n.h);
+    }
+    if (!xs.length) continue;
+    const pad=26, x=Math.min(...xs)-pad, y=Math.min(...ys)-pad-22,
+          w=Math.max(...xe)-x+pad, h=Math.max(...ye)-y+pad;
+    const g = el('g', {class:'bdrop'}, gB);
+    el('rect', {x, y, width:w, height:h, rx:6}, g);
+    const t = el('text', {x:x+12, y:y+18}, g);
+    t.textContent = bd.label;
+  }
+
+  /* edges */
+  for (const n of nodes.values()){
+    if (n.x == null) continue;
+    const ep = entryPoints(n);
+    for (const [key, ref] of Object.entries(n.inputs)){
+      if (!ref) continue;
+      const p = nodes.get(ref); if (p?.x == null) continue;
+      const sx = p.x, sy = p.y + p.h;
+      if (key === 'mask'){
+        const left = p.x < n.x;                          // entra pelo lado que encara a fonte
+        const ex = left ? n.x - n.w/2 : n.x + n.w/2;
+        const ey = n.y + n.h/2;
+        if (n.pos && p.pos){
+          // posições reais: linha reta tracejada, como o Nuke desenha
+          el('line', {class:'edge mask', x1:sx, y1:sy, x2:ex, y2:ey, 'marker-end':'url(#arrowMask)'}, gE);
+        } else {
+          const elbowX = left ? Math.min(sx, ex - 34) : Math.max(sx, ex + 34);
+          el('path', {class:'edge mask','marker-end':'url(#arrowMask)',
+            d:`M ${sx} ${sy} L ${sx} ${sy+24} L ${elbowX} ${sy+24} L ${elbowX} ${ey} L ${ex} ${ey}`}, gE);
+        }
+      } else {
+        const e = ep[key] || ep.input;
+        if ((e.y - sy) > ROW_GAP * 1.4 && !(n.pos && p.pos)){
+          // pipe atravessa fileiras intermediárias: roteia por uma "lane" lateral
+          const jitter = ([...n.name+key].reduce((a,c)=>a+c.charCodeAt(0),0) % 4) * 9;
+          const lx = Math.min(sx, e.x) - 72 - jitter;
+          el('path', {class:'edge','marker-end':'url(#arrow)', fill:'none',
+            d:`M ${sx} ${sy} L ${sx} ${sy+16} L ${lx} ${sy+16} L ${lx} ${e.y-24} L ${e.x} ${e.y-24} L ${e.x} ${e.y-3}`}, gE);
+        } else {
+          el('line', {class:'edge', x1:sx, y1:sy, x2:e.x, y2:e.y-3, 'marker-end':'url(#arrow)'}, gE);
+        }
+      }
+    }
+    /* badges A/B (sempre que o esquema A/B se aplica, mesmo faltando) */
+    const wantsAB = isMergeClass(n.cls) || n.inputs.A || n.inputs.B || n.missing_A || n.missing_B;
+    if (wantsAB){
+      for (const key of ['B','A']){
+        const e = entryPoints(n)[key];
+        const missing = !n.inputs[key];
+        const g = el('g', {class:'pipeBadge'+(missing?' missing':'')}, gE);
+        el('circle', {cx:e.x, cy:e.y-13, r:8}, g);
+        const t = el('text', {x:e.x, y:e.y-9.6, 'text-anchor':'middle'}, g);
+        t.textContent = key;
+      }
+    }
+    if (n.inputs.mask || n.missing_mask){
+      const pm = n.inputs.mask ? nodes.get(n.inputs.mask) : null;
+      const left = !!(pm && pm.x != null && pm.x < n.x);
+      const bx = left ? n.x - n.w/2 - 13 : n.x + n.w/2 + 13;
+      const by = n.y + n.h/2;
+      const g = el('g', {class:'pipeBadge'+(n.inputs.mask?'':' missing')}, gE);
+      el('circle', {cx:bx, cy:by, r:8}, g);
+      const t = el('text', {x:bx, y:by+3.4, 'text-anchor':'middle'}, g);
+      t.textContent = 'm';
+    }
+  }
+
+  /* nodes */
+  for (const n of nodes.values()){
+    if (n.x == null) continue;
+    const fill = colorFor(n.cls), tcol = textColorFor(fill);
+    const cls = ['node', n.invalid?'err':'', newSet?.has(n.name)?'new':'', selected===n.name?'selected':'']
+                .filter(Boolean).join(' ');
+    const g = el('g', {class:cls, 'data-name':n.name}, gN);
+    if (n.cls === 'Dot'){
+      el('circle', {class:'body', cx:n.x, cy:n.y+n.h/2, r:9, fill:'#9a9a93'}, g);
+      const t = el('text', {class:'dotName', x:n.x+13, y:n.y+n.h/2+3}, g);
+      t.textContent = n.name;
+      g.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
+      g.addEventListener('click', ev => { ev.stopPropagation(); select(n.name); });
+      continue;
+    }
+    el('rect', {class:'body', x:n.x-n.w/2, y:n.y, width:n.w, height:n.h, rx:3, fill}, g);
+    const sub = subLabel(n);
+    const name = el('text', {class:'nodeName', x:n.x, y:n.y + (sub?15:22), 'text-anchor':'middle', fill:tcol}, g);
+    name.textContent = n.name;
+    if (sub){
+      const s = el('text', {class:'nodeSub', x:n.x, y:n.y+28, 'text-anchor':'middle',
+                            fill:tcol, 'fill-opacity':'0.82'}, g);
+      s.textContent = sub;
+    }
+    if (n.invalid){
+      const b = el('text', {class:'errBadge', x:n.x-n.w/2+6, y:n.y-6}, g);
+      b.textContent = '⚠';
+    }
+    g.addEventListener('pointerdown', ev => { ev.stopPropagation(); });
+    g.addEventListener('click', ev => { ev.stopPropagation(); select(n.name); });
+  }
+  applyView();
+}
+
+function subLabel(n){
+  const k = n.knobs;
+  if (isMergeClass(n.cls) && k.operation) return `(${k.operation})`;
+  if (/^Blur/i.test(n.cls) && k.size != null) return `size ${k.size}`;
+  if (/^Shuffle/i.test(n.cls)){
+    const m = Object.entries(k).find(([kk,v]) => ['red','green','blue','alpha'].includes(kk));
+    if (m) return `${m[1]} → ${m[0]}`;
+  }
+  if (/^Grade/i.test(n.cls)){
+    const parts = Object.entries(k).slice(0,2).map(([kk,v])=>`${kk} ${v}`);
+    if (parts.length) return parts.join(' · ');
+  }
+  if (/^Expression/i.test(n.cls)) return 'expr';
+  const first = Object.entries(k)[0];
+  if (first){ const s = `${first[0]} ${first[1]}`; return s.length>22 ? s.slice(0,21)+'…' : s; }
+  return '';
+}
+
+/* ================= inspector ================= */
+const inspector = document.getElementById('inspector');
+function select(name){
+  selected = name;
+  document.querySelectorAll('.node').forEach(g =>
+    g.classList.toggle('selected', g.dataset.name === name));
+  const n = MODEL.nodes.get(name);
+  if (!n){ inspector.classList.remove('show'); return; }
+  const knobRows = Object.entries(n.knobs)
+    .map(([k,v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
+  const inRows = Object.entries(n.inputs)
+    .map(([k,v]) => `<tr><td>${esc(k)}</td><td>${v?esc(v):'<span style="color:var(--err)">— faltando ('+esc(n['missing_'+k]||'?')+')</span>'}</td></tr>`).join('');
+  inspector.innerHTML = `
+    <div class="head">
+      <span class="chip" style="background:${colorFor(n.cls)}"></span>
+      <b>${esc(n.name)}</b><span class="cls">${esc(n.cls)}</span>
+      <button id="inspClose" aria-label="Fechar painel">×</button>
+    </div>
+    <section><h3>Inputs</h3>${inRows?`<table>${inRows}</table>`:'<div class="empty">sem inputs (source)</div>'}</section>
+    <section><h3>Knobs</h3>${knobRows?`<table>${knobRows}</table>`:'<div class="empty">defaults</div>'}</section>
+    ${n.note?`<section><h3>Nota</h3><div class="note">→ ${esc(n.note)}</div></section>`:''}`;
+  inspector.classList.add('show');
+  document.getElementById('inspClose').onclick = () => {
+    selected = null; inspector.classList.remove('show');
+    document.querySelectorAll('.node.selected').forEach(g=>g.classList.remove('selected'));
+  };
+}
+
+/* ================= pan / zoom ================= */
+const pointers = new Map();
+let panStart = null, pinchStart = null;
+
+svg.addEventListener('pointerdown', e => {
+  svg.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if (pointers.size === 1){
+    dragDist = 0;
+    panStart = { x:e.clientX, y:e.clientY, tx:view.tx, ty:view.ty };
+    svg.classList.add('panning');
+  } else if (pointers.size === 2){
+    panStart = null;
+    const [p1,p2] = [...pointers.values()];
+    pinchStart = { d: Math.hypot(p1.x-p2.x, p1.y-p2.y), s: view.s,
+                   mx:(p1.x+p2.x)/2, my:(p1.y+p2.y)/2, tx:view.tx, ty:view.ty };
+  }
+});
+svg.addEventListener('pointermove', e => {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if (pointers.size === 1 && panStart){
+    dragDist = Math.hypot(e.clientX - panStart.x, e.clientY - panStart.y);
+    view.tx = panStart.tx + (e.clientX - panStart.x);
+    view.ty = panStart.ty + (e.clientY - panStart.y);
+    applyView();
+  } else if (pointers.size === 2 && pinchStart){
+    const [p1,p2] = [...pointers.values()];
+    const d = Math.hypot(p1.x-p2.x, p1.y-p2.y);
+    const s = clamp(pinchStart.s * d / pinchStart.d, .1, 4);
+    const r = svg.getBoundingClientRect();
+    const mx = pinchStart.mx - r.left, my = pinchStart.my - r.top;
+    view.tx = mx - (mx - pinchStart.tx) * (s / pinchStart.s);
+    view.ty = my - (my - pinchStart.ty) * (s / pinchStart.s);
+    view.s = s;
+    applyView();
+  }
+});
+const endPointer = e => {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinchStart = null;
+  if (pointers.size === 0){ panStart = null; svg.classList.remove('panning'); }
+};
+svg.addEventListener('pointerup', endPointer);
+svg.addEventListener('pointercancel', endPointer);
+let dragDist = 0;
+svg.addEventListener('click', () => {            // clique no fundo deseleciona (ignora arrasto)
+  if (dragDist > 5) return;
+  if (selected){ selected=null; inspector.classList.remove('show');
+    document.querySelectorAll('.node.selected').forEach(g=>g.classList.remove('selected')); }
+});
+svg.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = svg.getBoundingClientRect();
+  zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0012));
+}, {passive:false});
+
+const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
+function zoomAt(px, py, factor){
+  const s = clamp(view.s * factor, .1, 4);
+  view.tx = px - (px - view.tx) * (s / view.s);
+  view.ty = py - (py - view.ty) * (s / view.s);
+  view.s = s;
+  applyView();
+}
+document.getElementById('zin').onclick = () => {
+  const r = svg.getBoundingClientRect(); zoomAt(r.width/2, r.height/2, 1.25);
+};
+document.getElementById('zout').onclick = () => {
+  const r = svg.getBoundingClientRect(); zoomAt(r.width/2, r.height/2, .8);
+};
+
+function fitView(){
+  if (!MODEL) return;
+  const ns = [...MODEL.nodes.values()].filter(n=>n.x!=null);
+  if (!ns.length) return;
+  const x0 = Math.min(...ns.map(n=>n.x-n.w/2))-60, x1 = Math.max(...ns.map(n=>n.x+n.w/2))+60;
+  const y0 = Math.min(...ns.map(n=>n.y))-70,        y1 = Math.max(...ns.map(n=>n.y+n.h))+60;
+  const r = svg.getBoundingClientRect();
+  const s = clamp(Math.min(r.width/(x1-x0), r.height/(y1-y0)), .1, 1.6);
+  view.s = s;
+  view.tx = (r.width  - (x1-x0)*s)/2 - x0*s;
+  view.ty = (r.height - (y1-y0)*s)/2 - y0*s;
+  applyView();
+}
+document.getElementById('btnFit').onclick = fitView;
+window.addEventListener('keydown', e => {        // F = enquadrar, como no Nuke
+  const tag = (document.activeElement?.tagName || '').toLowerCase();
+  if (e.key.toLowerCase() === 'f' && tag !== 'input' && tag !== 'textarea') fitView();
+});
+
+/* ================= export .nk ================= */
+const sanitizeVar = s => s.replace(/[^A-Za-z0-9_]/g,'_');
+function tclValue(v){
+  const s = String(v);
+  return /^[A-Za-z0-9_.\-]+$/.test(s) ? s : `{${s}}`;
+}
+const EXPR_MAP = { expr_r:'expr0', expr_g:'expr1', expr_b:'expr2', expr_a:'expr3' };
+function mapKnobs(n){
+  const out = [];
+  for (const [k,v] of Object.entries(n.knobs)){
+    const key = /^Expression/i.test(n.cls) ? (EXPR_MAP[k] || k) : k;
+    out.push(` ${key} ${tclValue(v)}`);
+  }
+  return out;
+}
+function exportNK(model){
+  const L = ['set cut_paste_input [stack 0]', 'version 14.0 v1'];
+  // coordenadas no referencial do Nuke (âncora canto sup. esq.),
+  // re-baseadas para começar em (0,0): layout relativo preservado,
+  // sem arremessar o paste para longe no DAG do usuário.
+  const coord = new Map();
+  let minX = Infinity, minY = Infinity;
+  for (const name of model.order){
+    const n = model.nodes.get(name);
+    const NW = n.cls === 'Dot' ? 12 : 80, NH = n.cls === 'Dot' ? 12 : 18;
+    const x = Math.round((n.x ?? 0) - NW/2);
+    const y = Math.round((n.y ?? 0) + (n.h ?? NODE_H)/2 - NH/2);
+    coord.set(name, [x, y]);
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+  }
+  if (!Number.isFinite(minX)){ minX = 0; minY = 0; }
+  for (const name of model.order){
+    const n = model.nodes.get(name);
+    // ordem de stack do Nuke: o TOPO da pilha vira o input 0 (último push = input 0).
+    // Logo, empilha do índice mais alto para o mais baixo:
+    // Merge2 (2+1): push mask, push A, push B  →  B=input0, A=input1, mask=input2
+    const pushes = [];
+    let inputsKnob = null;
+    if (n.inputs.A || n.inputs.B){
+      inputsKnob = n.inputs.mask ? '2+1' : '2';
+      if (n.inputs.mask) pushes.push(n.inputs.mask);
+      pushes.push(n.inputs.A, n.inputs.B);
+    } else if (n.inputs.input){
+      if (n.inputs.mask){ pushes.push(n.inputs.mask); inputsKnob = '1+1'; }
+      pushes.push(n.inputs.input);
+    } else if (n.inputs.mask){
+      pushes.push(n.inputs.mask); inputsKnob = '0+1';
+    }
+    for (const ref of pushes) L.push(ref ? `push $N${sanitizeVar(ref)}` : 'push 0');
+    L.push(`${n.cls} {`);
+    if (inputsKnob) L.push(` inputs ${inputsKnob}`);
+    L.push(...mapKnobs(n));
+    L.push(` name ${n.name}`);
+    const [cx, cy] = coord.get(name);
+    L.push(` xpos ${cx - minX}`);
+    L.push(` ypos ${cy - minY}`);
+    L.push('}');
+    L.push(`set N${sanitizeVar(n.name)} [stack 0]`);
+  }
+  return L.join('\n');
+}
+
+/* ================= tabela ================= */
+function makeTable(model){
+  const rows = model.order.map(name => {
+    const n = model.nodes.get(name);
+    const op = (isMergeClass(n.cls) && n.knobs.operation) ? n.knobs.operation : n.cls;
+    const ins = ['A','B','input','mask']
+      .filter(k => k in n.inputs || n['missing_'+k])
+      .map(k => `${k}=${n.inputs[k] || ('⚠'+(n['missing_'+k]||'?'))}`);
+    const knobStr = Object.entries(n.knobs)
+      .filter(([k]) => k!=='operation')
+      .slice(0,3).map(([k,v]) => `${k}=${String(v).length>26?String(v).slice(0,25)+'…':v}`).join(', ');
+    return {
+      a: `${n.name} (${op})`,
+      b: ins.join('  ') || '—',
+      c: knobStr ? `[${knobStr}]` : '',
+      d: n.note ? `→ ${n.note}` : ''
+    };
+  });
+  const wa = Math.max(...rows.map(r=>r.a.length)),
+        wb = Math.max(...rows.map(r=>r.b.length)),
+        wc = Math.max(...rows.map(r=>r.c.length));
+  return rows.map(r =>
+    `${r.a.padEnd(wa+2)}${r.b.padEnd(wb+2)}${r.c.padEnd(wc?wc+2:0)}${r.d}`.trimEnd()
+  ).join('\n');
+}
+
+/* ================= drawer / copiar ================= */
+const drawer = document.getElementById('drawer'),
+      drawerOut = document.getElementById('drawerOut'),
+      drawerTitle = document.getElementById('drawerTitle');
+function openDrawer(title, text){
+  drawerTitle.textContent = title;
+  drawerOut.textContent = text;
+  drawer.classList.add('show');
+}
+document.getElementById('btnCloseDrawer').onclick = () => drawer.classList.remove('show');
+document.getElementById('btnCopy').onclick = async () => {
+  const t = drawerOut.textContent;
+  try { await navigator.clipboard.writeText(t); flashCopy('Copiado ✓'); }
+  catch {
+    const range = document.createRange();
+    range.selectNodeContents(drawerOut);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    flashCopy('Selecionado — Ctrl/Cmd+C');
+  }
+};
+function flashCopy(msg){
+  const b = document.getElementById('btnCopy'), old = b.textContent;
+  b.textContent = msg; setTimeout(()=> b.textContent = old, 1400);
+}
+document.getElementById('btnNk').onclick = () => {
+  if (MODEL) openDrawer('Snippet .nk (clipboard do Nuke)', exportNK(MODEL));
+};
+document.getElementById('btnTable').onclick = () => {
+  if (MODEL) openDrawer('Tabela de nós (inputs explícitos)', makeTable(MODEL));
+};
+
+/* ================= painel JSON / render ================= */
+const errorsEl = document.getElementById('errors');
+const jsonInput = document.getElementById('jsonInput');
+const jsonPanel = document.getElementById('jsonPanel');
+document.getElementById('btnJson').onclick = e => {
+  jsonPanel.classList.toggle('hidden');
+  e.currentTarget.setAttribute('aria-pressed', String(!jsonPanel.classList.contains('hidden')));
+};
+
+function doRender(first=false){
+  let data;
+  errorsEl.innerHTML = ''; errorsEl.classList.remove('show');
+  try { data = JSON.parse(jsonInput.value); }
+  catch (err){
+    errorsEl.innerHTML = `<li><strong>JSON inválido:</strong> ${esc(err.message)}</li>`;
+    errorsEl.classList.add('show');
+    return;
+  }
+  const model = validate(data);
+  layout(model);
+  const names = new Set(model.nodes.keys());
+  const newSet = (lastNames && !first)
+    ? new Set([...names].filter(n => !lastNames.has(n)))
+    : new Set();
+  lastNames = names;
+  MODEL = model;
+  if (selected && !names.has(selected)){ selected = null; inspector.classList.remove('show'); }
+  render(model, newSet);
+  if (selected) select(selected);
+  const msgs = model.errors.map(m=>`<li>${m}</li>`).join('') +
+               (model.warnings||[]).map(m=>`<li class="warn">${m}</li>`).join('');
+  if (msgs){
+    errorsEl.innerHTML = msgs;
+    errorsEl.classList.add('show');
+  }
+  if (first) requestAnimationFrame(fitView);
+}
+document.getElementById('btnRender').onclick = () => doRender(false);
+
+/* ================= importação .nk (clipboard do Nuke) ================= */
+/* Semântica de pilha do Nuke: cada nó pope seus inputs; o TOPO da pilha
+   vira o input 0 (prova: numa cadeia linear sem push, o nó anterior — topo —
+   conecta no input 0). Itens mais fundos → índices mais altos.
+   Merge2: input0=B (topo), input1=A, input2=mask (mais fundo).
+   Qualquer ambiguidade na resolução → erro fatal, sem chute. */
+
+const EXT = { ext: true };   // sentinela: conexão externa (cut_paste_input)
+
+// nº de inputs padrão por classe quando o knob "inputs" está ausente.
+// Cobertura: nodes padrão do Nuke, por categoria de menu. Nodes de aridade
+// VARIÁVEL (Switch, ContactSheet, AppendClip, JoinViews, Scene,
+// ScanlineRender, MergeGeo, CopyCat…) ficam FORA de propósito: o Nuke sempre
+// serializa o knob "inputs" neles; sem o knob, a contagem é ambígua → erro.
+// Gizmos/OFX (ex.: Keylight) são classes externas → erro pedindo "inputs N".
+const NK_INPUTS = {
+  // Image
+  Read:0, Write:1, Constant:0, CheckerBoard2:0, CheckerBoard:0, ColorBars:0,
+  ColorWheel:0, CurveTool:1,
+  // Draw
+  Text2:1, Text:1, Ramp:1, Radial:1, Rectangle:1, Grid:1, Flare:1, Glint:1,
+  Sparkles:1, Noise:1, Dither:1, DustBust:1, Grain2:1, Grain:1, ScannedGrain:1,
+  // Roto serializa 1 por default (input bg): provado por paste real — Roto
+  // desconectado ganha "inputs 0" explícito; com bg conectado o knob é omitido
+  // e o Nuke faz "push" do item consumido. RotoPaint: mesma família, suspeito
+  // de também ser 1 — pendente confirmar com map_inputs_gui.py.
+  Roto:1, RotoPaint:0, LightWrap:2,
+  // Time
+  FrameBlend:1, FrameHold:1, FrameRange:1, Retime:1, TemporalMedian:1,
+  TimeBlur:1, TimeEcho:1, TimeOffset:1, TimeWarp:1, OFlow2:1, OFlow:1,
+  Kronos:1, TimeClip:1, NoTimeBlur:1, SmartVector:1, VectorGenerator:1,
+  // Channel
+  Shuffle2:1, Shuffle:1, ShuffleCopy:2, Copy:2, ChannelMerge:2, Remove:1,
+  // Color
+  Add:1, Multiply:1, Gamma:1, Clamp:1, ClipTest:1, Invert:1, Saturation:1,
+  HueShift:1, HueCorrect:1, HueKeyer:1, ColorCorrect:1, ColorLookup:1, Grade:1,
+  Toe2:1, Toe:1, Posterize:1, SoftClip:1, EXPTool:1, Exposure:1, Crosstalk:1,
+  ColorMatrix:1, ColorTransfer:2, MatchGrade:2, MinColor:1, Histogram:1,
+  HistEQ:1, Colorspace:1, Log2Lin:1, Lin2Log:1, PLogLin:1, Vectorfield:1,
+  GenerateLUT:1, CMSTestPattern:0, Expression:1, MergeExpression:2,
+  OCIOColorSpace:1, OCIOCDLTransform:1, OCIODisplay:1, OCIOFileTransform:1,
+  OCIOLogConvert:1, OCIOLookTransform:1, OCIONamedTransform:1,
+  // Filter
+  Blur:1, Bilateral:1, Defocus:1, ZDefocus2:1, ZDefocus:1, Convolve2:2,
+  Convolve:2, EdgeBlur:1, EdgeDetect:1, Emboss:1, Erode:1, FilterErode:1,
+  Dilate:1, Glow2:1, Glow:1, GodRays:1, Laplacian:1, Matrix:1, Median:1,
+  Sharpen:1, Soften:1, VolumeRays:1, MotionBlur:1, VectorBlur2:1, VectorBlur:1,
+  DirBlurWrapper:1, Denoise2:1, Denoise:1, DropShadow:2,
+  // Keyer
+  Keyer:1, Difference:2, Primatte3:2, Primatte:2, IBKColourV3:1, IBKGizmoV3:3,
+  ChromaKeyer:1, Cryptomatte:1, Encryptomatte:2,
+  // Merge
+  Merge2:2, Merge:2, Keymix:3, CopyBBox:2, CopyRectangle:2, Dissolve:2,
+  LayerContactSheet:1, Premult:1, Unpremult:1, AddMix:2, ZMerge:2,
+  // Transform
+  Transform:1, TransformMasked:1, Card3D:1, CornerPin2D:1, Crop:1, IDistort:1,
+  LensDistortion2:1, LensDistortion:1, Mirror2:1, Mirror:1, Position:1,
+  Reformat:1, SphericalTransform:1, SplineWarp3:1, GridWarp3:1, GridWarp2:1,
+  Tracker4:1, Tracker3:1, Stabilize2D:1, AdjBBox:1, BlackOutside:1, STMap:2,
+  VectorDistort:2, Reconcile3D:3, PointsTo3D:1,
+  // Views / Stereo
+  OneView:1, MixViews:2, ShuffleViews:1, Anaglyph:1, SideBySide:2,
+  // Deep
+  DeepRead:0, DeepWrite:1, DeepColorCorrect:1, DeepCrop:1, DeepExpression:1,
+  DeepFromFrames:1, DeepFromImage:1, DeepHoldout:2, DeepRecolor:2,
+  DeepReformat:1, DeepSample:1, DeepToImage:1, DeepToPoints:2, DeepTransform:1,
+  DeepMerge:2,
+  // MetaData
+  ModifyMetaData:1, ViewMetaData:1, CompareMetaData:2, CopyMetaData:2,
+  AddTimeCode:1,
+  // 3D (principais; os variáveis serializam "inputs" sozinhos)
+  Camera3:0, Camera2:0, Camera:0, Axis3:0, Axis2:0, Light3:0, Light2:0,
+  Light:0, Spotlight:0, DirectLight:0, Environment:0, ReadGeo2:0, ReadGeo:0,
+  WriteGeo:1, Card2:1, Card:1, Cube:1, Sphere:1, Cylinder:1, TransformGeo:1,
+  DisplaceGeo:1, UVProject:2, Project3D2:2, Project3D:2, ApplyMaterial:2,
+  BasicMaterial:1, Phong:1, Emission:1, Diffuse:1, Specular:1, Normals:1,
+  EditGeo:1, GeoSelect:1,
+  // ML / AIR
+  Inference:1, Upscale:1, Deblur:1,
+  // Other
+  Dot:1, NoOp:1, PostageStamp:1, StickyNote:0, Input:0, Output:1, DiskCache:1,
+  Precomp:0, Assert:1
+};
+
+/* Tabela carregada em runtime do nodes.json do Nuke do usuário.
+   Uso: validação de nomes de knobs (JSON autorado à mão) e min/max para
+   mensagens de erro de classes desconhecidas. NÃO é fonte de aridade
+   default — n.inputs() de um node recém-criado e isolado é sempre 0
+   (reflete inputs *conectados*, não a aridade da classe); a aridade
+   vem do knob "inputs" do script ou da tabela embutida NK_INPUTS.
+   Campos por classe:
+   - min/max: contagem TOTAL de inputs (inclui opcionais/mask)
+   - knobs: nomes válidos, para validar JSON autorado à mão */
+let NK_USER = null;
+
+if (typeof document !== 'undefined'){
+  const statusEl = document.getElementById('nodesStatus');
+  document.getElementById('nodesFile').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      let text;                                            // PowerShell '>' grava UTF-16
+      if (buf[0]===0xFF && buf[1]===0xFE) text = new TextDecoder('utf-16le').decode(buf);
+      else if (buf[0]===0xFE && buf[1]===0xFF) text = new TextDecoder('utf-16be').decode(buf);
+      else text = new TextDecoder('utf-8').decode(buf);
+      const start = text.indexOf('{');                     // pula banner do nuke -t
+      if (start < 0) throw new Error('nenhum JSON encontrado no arquivo');
+      const data = JSON.parse(text.slice(start));
+      const map = new Map();
+      for (const [cls, info] of Object.entries(data)){
+        if (!info || typeof info !== 'object') continue;
+        map.set(cls, {
+          min: Number.isFinite(info.minInputs) ? info.minInputs : null,
+          max: Number.isFinite(info.maxInputs) ? info.maxInputs : null,
+          knobs: Array.isArray(info.knobs) ? new Set(info.knobs) : null
+        });
+      }
+      if (!map.size) throw new Error('nenhuma classe no JSON');
+      NK_USER = map;
+      statusEl.textContent = `${map.size} classes carregadas de ${f.name} — validação de knobs ativa; aridade vem do knob "inputs" do script ou da tabela embutida.`;
+      if (MODEL) doRender(false);                          // revalida com a nova tabela
+    } catch (err){
+      NK_USER = null;
+      statusEl.textContent = 'falha ao ler nodes.json: ' + err.message;
+    }
+  });
+}
+
+function captureBraced(text, openIdx){
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++){
+    const c = text[i];
+    if (c === '{') depth++;
+    else if (c === '}'){ depth--; if (!depth) return { inner: text.slice(openIdx+1, i), end: i+1 }; }
+  }
+  return null;
+}
+
+function parseKnobBlock(inner){
+  const knobs = {};
+  let i = 0; const n = inner.length;
+  while (i < n){
+    while (i < n && /\s/.test(inner[i])) i++;
+    if (i >= n) break;
+    let j = i;
+    while (j < n && !/\s/.test(inner[j])) j++;
+    const key = inner.slice(i, j);
+    i = j;
+    while (i < n && (inner[i] === ' ' || inner[i] === '\t')) i++;
+    let value;
+    if (inner[i] === '{'){
+      const cap = captureBraced(inner, i);
+      if (!cap) return { error: `chaves desbalanceadas no knob "${key}"` };
+      value = cap.inner.trim();
+      i = cap.end;
+    } else {
+      let k = i;
+      while (k < n && inner[k] !== '\n') k++;
+      value = inner.slice(i, k).trim().replace(/^"([\s\S]*)"$/, '$1');
+      i = k;
+    }
+    if (key) knobs[key] = value;
+  }
+  return { knobs };
+}
+
+const NK_DROP = new Set(['name','xpos','ypos','selected','inputs','addUserKnob',
+  'tile_color','gl_color','note_font','note_font_size','postage_stamp',
+  'hide_input','cached','dope_sheet','bookmark','label']);
+const EXPR_UNMAP = { expr0:'expr_r', expr1:'expr_g', expr2:'expr_b', expr3:'expr_a' };
+
+function parseNK(text){
+  const errors = [], warnings = [];
+  const fatal = m => errors.push(m);
+  const stack = [];
+  const vars = Object.create(null);
+  const out = [], used = new Set();
+  let pos = 0; const N = text.length;
+
+  while (pos < N && !errors.length){
+    const startPos = pos;
+    let e = text.indexOf('\n', pos); if (e === -1) e = N;
+    const line = text.slice(pos, e); pos = e + 1;
+    const t = line.trim();
+    if (!t || t.startsWith('#') || /^version\b/.test(t)) continue;
+    let m;
+
+    if ((m = t.match(/^set\s+(\w+)\s+\[stack\s+(\d+)\]$/))){
+      const v = stack[stack.length - 1 - (+m[2])];
+      vars[m[1]] = (v === undefined) ? EXT : v;   // pilha vazia = referência externa
+      continue;
+    }
+    if ((m = t.match(/^push\s+\$(\w+)$/))){
+      const v = vars[m[1]];
+      if (v === undefined){
+        stack.push(EXT);   // definida fora do trecho colado: conexão externa
+        if (m[1] !== 'cut_paste_input')
+          warnings.push(`push $${esc(m[1])}: variável definida fora do trecho colado — tratada como conexão externa.`);
+      } else stack.push(v);
+      continue;
+    }
+    if (/^push\s+0$/.test(t)){ stack.push(null); continue; }
+    if (/^clone\b/.test(t)){ fatal('Script contém <strong>clone</strong> — não suportado pelo importador.'); break; }
+    if (/^end_group\b/.test(t)){ fatal('Script contém <strong>Group/end_group</strong> — não suportado.'); break; }
+
+    if (/^add_layer\s*\{/.test(t)){
+      const cap = captureBraced(text, startPos + line.indexOf('{'));
+      if (!cap){ fatal('add_layer com chaves desbalanceadas.'); break; }
+      pos = afterLine(text, cap.end);
+      continue;
+    }
+
+    if ((m = t.match(/^([A-Za-z_][\w.]*)\s*\{/))){
+      const cls = m[1];
+      if (cls === 'Group'){ fatal('Script contém <strong>Group</strong> — não suportado.'); break; }
+      const cap = captureBraced(text, startPos + line.indexOf('{'));
+      if (!cap){ fatal(`Bloco de <strong>${esc(cls)}</strong> com chaves desbalanceadas.`); break; }
+      pos = afterLine(text, cap.end);
+      const pk = parseKnobBlock(cap.inner);
+      if (pk.error){ fatal(`${esc(cls)}: ${esc(pk.error)}.`); break; }
+      const knobs = pk.knobs;
+
+      if (cls === 'BackdropNode'){
+        warnings.push(`BackdropNode "${esc(knobs.label||'')}" ignorado — descreva-o via "backdrops" no JSON.`);
+        continue;
+      }
+      if (cls === 'Viewer'){ warnings.push('Viewer ignorado.'); continue; }
+
+      /* quantos inputs este nó consome da pilha? */
+      let main, maskC = 0;
+      if (knobs.inputs != null){
+        const im = String(knobs.inputs).match(/^(\d+)\s*(?:\+\s*(\d+))?$/);
+        if (!im){ fatal(`${esc(cls)}: knob inputs "${esc(knobs.inputs)}" não reconhecido.`); break; }
+        main = +im[1]; maskC = +(im[2] || 0);
+      } else if (cls in NK_INPUTS){
+        main = NK_INPUTS[cls];
+      } else if (NK_USER?.has(cls)){
+        const u = NK_USER.get(cls);
+        fatal(`Classe <strong>${esc(cls)}</strong> consta no seu nodes.json (inputs ${u.min}–${u.max}, contando opcionais) mas não está na tabela embutida e o script não traz o knob <code>inputs</code> — aridade default ambígua. Adicione <code>inputs N</code> ao bloco.`);
+        break;
+      } else {
+        fatal(`Classe <strong>${esc(cls)}</strong> desconhecida e sem knob <code>inputs</code> — número de inputs consumidos da pilha é ambíguo; não vou chutar. Adicione <code>inputs N</code> ao bloco, ou carregue o nodes.json gerado pelo script v2.`);
+        break;
+      }
+      if (maskC > 1){ fatal(`${esc(cls)}: inputs ${main}+${maskC} (múltiplas máscaras) não suportado.`); break; }
+
+      const total = main + maskC;
+      // Pilha mais curta que o necessário = upstream ficou fora do trecho
+      // colado. Determinístico, não chute: o topo (input 0) recebe o que
+      // existe; os índices mais fundos viram conexões externas.
+      const popped = [];
+      for (let k = 0; k < total; k++) popped.push(stack.length ? stack.pop() : EXT);  // popped[0] = topo = input0
+
+      const dispName = knobs.name || cls;
+      const inputs = {};
+      const assign = (v, label) => {
+        if (v === null) return;                       // push 0 = desconectado de propósito
+        if (v === EXT){
+          warnings.push(`<strong>${esc(dispName)}</strong>: input <strong>${label}</strong> vem de fora do trecho colado — deixado desconectado.`);
+          return;
+        }
+        inputs[label] = v;
+      };
+      if (main === 1){ assign(popped[0], 'input'); }
+      else if (main === 2){ assign(popped[0], 'B'); assign(popped[1], 'A'); }
+      else if (main === 3 && cls === 'Keymix' && !maskC){
+        assign(popped[0], 'B'); assign(popped[1], 'A'); assign(popped[2], 'mask');
+      }
+      else if (main >= 3){
+        fatal(`<strong>${esc(dispName)}</strong>: ${main} inputs principais não são representáveis no schema canônico (A/B/mask/input) — mapeamento ambíguo.`);
+        break;
+      }
+      if (maskC) assign(popped[total-1], 'mask');
+
+      /* nome único */
+      let name = String(knobs.name || '').trim() || cls + (out.length + 1);
+      const base = name; let c = 2;
+      while (used.has(name)){ name = `${base}_${c++}`; }
+      if (name !== base) warnings.push(`Nome duplicado "${esc(base)}" renomeado para "${esc(name)}".`);
+      used.add(name);
+
+      /* knobs limpos (xpos/ypos/selected etc. ficam de fora; label vira note) */
+      const cleanKnobs = {};
+      for (const [k, v] of Object.entries(knobs)){
+        if (NK_DROP.has(k)) continue;
+        const key = (cls === 'Expression') ? (EXPR_UNMAP[k] || k) : k;
+        cleanKnobs[key] = v;
+      }
+      const node = { name, class: cls };
+      const px = parseFloat(knobs.xpos), py = parseFloat(knobs.ypos);
+      if (Number.isFinite(px) && Number.isFinite(py)) node.pos = [Math.round(px), Math.round(py)];  // verbatim do script
+      if (Object.keys(cleanKnobs).length) node.knobs = cleanKnobs;
+      if (Object.keys(inputs).length) node.inputs = inputs;
+      if (knobs.label) node.note = knobs.label;
+      out.push(node);
+      stack.push(name);
+      continue;
+    }
+
+    warnings.push(`Linha ignorada: <code>${esc(t.slice(0, 60))}</code>`);
+  }
+
+  if (!out.length && !errors.length) errors.push('Nenhum nó encontrado no texto colado.');
+  return { errors, warnings, json: { nodes: out, backdrops: [] } };
+}
+function afterLine(text, idx){
+  const nl = text.indexOf('\n', idx);
+  return nl === -1 ? text.length : nl + 1;
+}
+
+/* Colapsa Dots: religa cada consumidor à fonte real, atravessando cadeias
+   de Dots; remove os Dots do JSON. Roteamento é geometria, não semântica. */
+function collapseDots(json){
+  const dots = new Map();
+  for (const n of json.nodes) if (n.class === 'Dot') dots.set(n.name, n.inputs?.input ?? null);
+  if (!dots.size) return { json, removed:0, labeled:[], dangling:[] };
+  const resolve = (name) => {
+    const seen = new Set();
+    while (dots.has(name)){
+      if (seen.has(name)) return null;          // ciclo de Dots
+      seen.add(name);
+      name = dots.get(name);
+      if (name == null) return null;            // cadeia solta
+    }
+    return name;
+  };
+  const labeled = json.nodes.filter(n => n.class==='Dot' && n.note).map(n => n.name);
+  const dangling = [];
+  const nodes = json.nodes.filter(n => n.class !== 'Dot').map(n => {
+    if (!n.inputs) return n;
+    const inputs = {};
+    for (const [k, v] of Object.entries(n.inputs)){
+      const r = resolve(v);
+      if (r != null) inputs[k] = r;
+      else if (dots.has(v)) dangling.push(`${n.name}.${k}`);
+    }
+    const copy = { ...n };
+    if (Object.keys(inputs).length) copy.inputs = inputs; else delete copy.inputs;
+    return copy;
+  });
+  const backdrops = (json.backdrops || []).map(b =>
+    ({ ...b, contains: (b.contains || []).filter(c => !dots.has(c)) }));
+  return { json: { nodes, backdrops }, removed: dots.size, labeled, dangling };
+}
+
+document.getElementById('btnImport').onclick = () => {
+  const text = document.getElementById('nkInput').value;
+  if (!text.trim()) return;
+  const res = parseNK(text);
+  errorsEl.innerHTML = ''; errorsEl.classList.remove('show');
+  if (res.errors.length){
+    // ambíguo ou inválido: acusa e NÃO renderiza nada
+    errorsEl.innerHTML =
+      res.errors.map(m => `<li><strong>Importação .nk:</strong> ${m}</li>`).join('') +
+      res.warnings.map(m => `<li class="warn">${m}</li>`).join('');
+    errorsEl.classList.add('show');
+    return;
+  }
+  jsonInput.value = '';
+  let json = res.json;
+  if (!document.getElementById('chkPos').checked)
+    json.nodes.forEach(n => delete n.pos);
+  if (document.getElementById('chkDots').checked){
+    const c = collapseDots(json);
+    json = c.json;
+    if (c.removed)
+      res.warnings.push(`${c.removed} Dot(s) colapsado(s) — consumidores religados à fonte real. Desmarque "Colapsar Dots" para mantê-los.`);
+    if (c.labeled.length)
+      res.warnings.push(`Dots com label removidos no colapso: <strong>${c.labeled.map(esc).join(', ')}</strong> — o texto deles se perdeu.`);
+    for (const d of c.dangling)
+      res.warnings.push(`<strong>${esc(d)}</strong>: apontava para cadeia de Dots sem fonte — deixado desconectado.`);
+  }
+  jsonInput.value = JSON.stringify(json, null, 2);
+  doRender(false);
+  if (res.warnings.length){
+    errorsEl.innerHTML += res.warnings.map(m => `<li class="warn">${m}</li>`).join('');
+    errorsEl.classList.add('show');
+  }
+  requestAnimationFrame(fitView);
+};
+/* ================= fim importação .nk ================= */
+
+/* ================= caso de teste inicial ================= */
+const EXPR_V = 'max(r,max(g,b))';
+const EXPR_S = '(max(r,max(g,b))-min(r,min(g,b)))/max(max(r,max(g,b)),0.0001)';
+const SAMPLE = {
+  nodes: [
+    { name:'Plate', class:'Read',
+      knobs:{ file:'plate.####.exr' }, note:'plate original (green screen)' },
+    { name:'Expression_V', class:'Expression',
+      knobs:{ expr_r:EXPR_V, expr_g:EXPR_V, expr_b:EXPR_V },
+      inputs:{ input:'Plate' }, note:'brilho máximo V' },
+    { name:'Expression_S', class:'Expression',
+      knobs:{ expr_r:EXPR_S, expr_g:EXPR_S, expr_b:EXPR_S },
+      inputs:{ input:'Plate' }, note:'saturação S' },
+    { name:'Merge12', class:'Merge2',
+      knobs:{ operation:'minus' },
+      inputs:{ A:'Expression_V', B:'Plate' }, note:'plate − V' },
+    { name:'Invert3', class:'Invert',
+      inputs:{ input:'Expression_S' }, note:'1 − S' },
+    { name:'Merge13', class:'Merge2',
+      knobs:{ operation:'multiply' },
+      inputs:{ A:'Invert3', B:'Merge12' }, note:'(plate−V)×(1−S)' },
+    { name:'Grade8', class:'Grade',
+      knobs:{ multiply:4, gamma:0.5 },
+      inputs:{ input:'Merge13' }, note:'ganho no matte' },
+    { name:'Shuffle7', class:'Shuffle',
+      knobs:{ alpha:'red' },
+      inputs:{ input:'Grade8' }, note:'red → alpha' },
+    { name:'Blur6', class:'Blur',
+      knobs:{ size:10 },
+      inputs:{ input:'Shuffle7' }, note:'falloff do matte' }
+  ],
+  backdrops: [
+    { label:'SpecularMatte — branco=specular, preto=diffuse',
+      contains:['Plate','Expression_V','Expression_S','Merge12','Invert3',
+                'Merge13','Grade8','Shuffle7','Blur6'] }
+  ]
+};
+jsonInput.value = JSON.stringify(SAMPLE, null, 2);
+doRender(true);
+window.addEventListener('resize', () => { /* mantém view; usuário pode re-enquadrar */ });
+</script>
+</body>
+</html>

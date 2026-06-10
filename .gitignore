@@ -1,0 +1,12 @@
+# Dados do estúdio — NUNCA versionar: os dumps contêm nomes de gizmos do
+# pipeline e os fixtures contêm setups/rotos de produção. Tudo é
+# regenerável localmente: ver data/README.md e tests/fixtures/README.md.
+data/*
+!data/README.md
+tests/fixtures/*
+!tests/fixtures/README.md
+
+*.tmp
+
+# Artefatos de debug de sessao (screenshots de setups de producao)
+bugs/
