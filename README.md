@@ -25,8 +25,9 @@ explícitos).
 - **Inputs sempre nomeados** (`A`, `B`, `mask`, `input`) — sem conexões
   implícitas; Merge sem A e B é erro visível.
 - **Erro > chute, sempre.** Ambiguidade real (classe desconhecida sem knob
-  `inputs`, `clone`, `Group`, chaves desbalanceadas) é fatal e explicada;
-  trecho parcial degrada com warnings determinísticos.
+  `inputs`, `clone`, `end_group` órfão, chaves desbalanceadas) é fatal e
+  explicada; trecho parcial degrada com warnings determinísticos. Groups
+  do usuário viram nós opacos (conteúdo não expandido, com aviso).
 - `pos` do script Nuke é preservado **verbatim**; export re-baseado em
   (0,0) para o paste não voar para longe.
 

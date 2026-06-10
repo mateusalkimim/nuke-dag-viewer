@@ -709,9 +709,18 @@ function exportNK(model){
       pushes.push(n.inputs.mask); inputsKnob = '0+1';
     }
     for (const ref of pushes) L.push(ref ? `push $N${sanitizeVar(ref)}` : 'push 0');
-    L.push(`${n.cls} {`);
+    const opaqueGroup = n.cls === 'Group';  // nó opaco: o corpo foi descartado no import
+    if (opaqueGroup)
+      L.push('# AVISO: o nó abaixo era um Group do usuário — conteúdo não exportável; placeholder NoOp preserva a topologia.');
+    L.push(`${opaqueGroup ? 'NoOp' : n.cls} {`);
     if (inputsKnob) L.push(` inputs ${inputsKnob}`);
-    L.push(...mapKnobs(n));
+    // Sem conexões e sem knob: grava "inputs 0" explícito. Pela lei
+    // medida, bloco sem knob consome 1 (não-generators) — um nó
+    // desconectado exportado sem o knob roubaria um item da pilha no
+    // paste do usuário.
+    else if (!pushes.length) L.push(' inputs 0');
+    if (opaqueGroup) L.push(` label "era um Group do usuário"`);
+    L.push(...(opaqueGroup ? [] : mapKnobs(n)));
     L.push(` name ${n.name}`);
     const [cx, cy] = coord.get(name);
     L.push(` xpos ${cx - minX}`);
@@ -1083,7 +1092,7 @@ function parseNK(text){
     }
     if (/^push\s+0$/.test(t)){ stack.push(null); continue; }
     if (/^clone\b/.test(t)){ fatal('Script contém <strong>clone</strong> — não suportado pelo importador.'); break; }
-    if (/^end_group\b/.test(t)){ fatal('Script contém <strong>Group/end_group</strong> — não suportado.'); break; }
+    if (/^end_group\b/.test(t)){ fatal('<code>end_group</code> sem <strong>Group</strong> correspondente — o trecho colado começa no meio de um Group; copie o Group inteiro.'); break; }
 
     if (/^add_layer\s*\{/.test(t)){
       const cap = captureBraced(text, startPos + line.indexOf('{'));
@@ -1094,7 +1103,6 @@ function parseNK(text){
 
     if ((m = t.match(/^([A-Za-z_][\w.]*)\s*\{/))){
       const cls = m[1];
-      if (cls === 'Group'){ fatal('Script contém <strong>Group</strong> — não suportado.'); break; }
       const cap = captureBraced(text, startPos + line.indexOf('{'));
       if (!cap){ fatal(`Bloco de <strong>${esc(cls)}</strong> com chaves desbalanceadas.`); break; }
       pos = afterLine(text, cap.end);
@@ -1108,12 +1116,45 @@ function parseNK(text){
       }
       if (cls === 'Viewer'){ warnings.push('Viewer ignorado.'); continue; }
 
+      /* Group do usuário → nó OPACO: o cabeçalho vira o nó; o corpo
+         (nós internos, set/push internos, Groups aninhados) é pulado em
+         bloco até o end_group casado, sem tocar a pilha externa.
+         Semanticamente fiel: o grupo ocupa exatamente 1 slot da pilha
+         (prova: paste real faz "set N… [stack 0]" logo após o
+         end_group e consome o item depois). */
+      let groupInternos = -1;
+      if (cls === 'Group'){
+        let gdepth = 1, internos = 0;
+        while (pos < N && gdepth > 0){
+          let e2 = text.indexOf('\n', pos); if (e2 === -1) e2 = N;
+          const l2 = text.slice(pos, e2);
+          const t2 = l2.trim();
+          if (/^end_group\b/.test(t2)){ gdepth--; pos = e2 + 1; continue; }
+          const hm = t2.match(/^([A-Za-z_][\w.]*)\s*\{/);
+          if (hm){
+            if (hm[1] === 'Group') gdepth++; else internos++;
+            const cap2 = captureBraced(text, pos + l2.indexOf('{'));
+            if (!cap2){ fatal(`Group <strong>${esc(String(knobs.name||''))}</strong>: bloco interno de <strong>${esc(hm[1])}</strong> com chaves desbalanceadas.`); break; }
+            pos = afterLine(text, cap2.end);
+            continue;
+          }
+          pos = e2 + 1;   // set/push/linhas internas: ignoradas de propósito
+        }
+        if (!errors.length && gdepth > 0)
+          fatal(`Group <strong>${esc(String(knobs.name||''))}</strong> sem <code>end_group</code> casado — o trecho colado está incompleto.`);
+        if (errors.length) break;
+        groupInternos = internos;
+      }
+
       /* quantos inputs este nó consome da pilha? */
       let main, maskC = 0;
       if (knobs.inputs != null){
         const im = String(knobs.inputs).match(/^(\d+)\s*(?:\+\s*(\d+))?$/);
         if (!im){ fatal(`${esc(cls)}: knob inputs "${esc(knobs.inputs)}" não reconhecido.`); break; }
         main = +im[1]; maskC = +(im[2] || 0);
+      } else if (cls === 'Group'){
+        fatal(`Group <strong>${esc(String(knobs.name||''))}</strong> sem knob <code>inputs</code> — a aridade default de Group ainda não foi medida (pendência: extractors/probe_group_inputs.py). Adicione <code>inputs N</code> ao bloco para importar já.`);
+        break;
       } else if (NK_USER_INPUTS?.has(cls) && NK_USER_INPUTS.get(cls) != null){
         main = NK_USER_INPUTS.get(cls);   // aridade medida no Nuke do usuário
       } else if (cls in NK_INPUTS){
@@ -1130,6 +1171,10 @@ function parseNK(text){
         break;
       }
       if (maskC > 1){ fatal(`${esc(cls)}: inputs ${main}+${maskC} (múltiplas máscaras) não suportado.`); break; }
+      if (cls === 'Group' && main + maskC > 1){
+        fatal(`Group <strong>${esc(String(knobs.name||''))}</strong> com <code>inputs ${esc(String(knobs.inputs))}</code> — Group opaco só é representável com 0 ou 1 input (schema canônico A/B/mask/input).`);
+        break;
+      }
 
       const total = main + maskC;
       // Pilha mais curta que o necessário = upstream ficou fora do trecho
@@ -1179,6 +1224,11 @@ function parseNK(text){
       if (Object.keys(cleanKnobs).length) node.knobs = cleanKnobs;
       if (Object.keys(inputs).length) node.inputs = inputs;
       if (knobs.label) node.note = knobs.label;
+      if (groupInternos >= 0){
+        const desc = `Group do usuário — conteúdo não expandido (${groupInternos} nós internos)`;
+        node.note = knobs.label ? `${knobs.label} — ${desc}` : desc;
+        warnings.push(`<strong>${esc(name)}</strong>: Group importado como nó opaco — ${groupInternos} nós internos ocultos.`);
+      }
       out.push(node);
       stack.push(name);
       continue;

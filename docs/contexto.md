@@ -2,7 +2,7 @@
 
 > Artefato HTML autocontido que renderiza setups de Nuke a partir de JSON canônico, importa/exporta o formato de clipboard `.nk`, e existe para **compreensão** (reconstrução manual no Nuke), não automação. Critério de sucesso: olhar o grafo e reconstruir o setup sem nenhuma dúvida sobre qual input vai onde.
 
-**Arquivos** (layout do repo `nuke-dag-viewer`): `nuke-dag-viewer.html` na raiz (artefato completo) · `extractors/map_nodes_v2.py` (plugins em disco, roda em `nuke -t`) · `extractors/map_nodes_gui.py` (núcleo compilado via menu, roda no Script Editor do Nuke GUI) · `extractors/merge_nodes.py` (mescla os dois dumps) · `extractors/map_inputs_gui.py` (aridade default de serialização por classe via `nuke.nodeCopy` multi-nó, Script Editor do GUI, autovalidação por âncoras) · `data/` fora do git: `nodes.json` (dump mesclado, Nuke 14.0v2, 565 classes: 423 núcleo + 449 plugins, 307 sobrepostas), `nodes_menu.json` (intermediário só do núcleo, 423 classes), `inputs_default.json` · `tests/fixtures/` fora do git: `nodes.txt` (regressão do bug do Roto), `nodes2.txt` (caso Group)
+**Arquivos** (layout do repo `nuke-dag-viewer`): `nuke-dag-viewer.html` na raiz (artefato completo) · `extractors/map_nodes_v2.py` (plugins em disco, roda em `nuke -t`) · `extractors/map_nodes_gui.py` (núcleo compilado via menu, roda no Script Editor do Nuke GUI) · `extractors/merge_nodes.py` (mescla os dois dumps) · `extractors/map_inputs_gui.py` (aridade default por classe via paste-oráculo, Script Editor do GUI, autovalidação por âncoras) · `extractors/probe_group_inputs.py` (diagnóstico pontual: aridade default de bloco `Group` sem knob, com controles) · `data/` fora do git: `nodes.json` (dump mesclado, Nuke 14.0v2, 565 classes: 423 núcleo + 449 plugins, 307 sobrepostas), `nodes_menu.json` (intermediário só do núcleo, 423 classes), `inputs_default.json` · `tests/fixtures/` fora do git: `nodes.txt` (regressão do bug do Roto), `nodes2.txt` (caso Group)
 
 ---
 
@@ -46,7 +46,8 @@
 - `push $Nxxxx` de variável nunca definida → sentinela EXTERNA + warning (não fatal).
 - Underflow de pilha → índices mais fundos viram externos; **determinístico**: topo recebe o que existe (Merge com 1 item: B=item, A=externo omitido).
 - Externos ficam desconectados com warning nomeando nó+input; se for A/B de Merge, a validação acusa normalmente.
-- **Continua fatal (ambiguidade real):** classe desconhecida sem knob `inputs`; `clone`; `Group/end_group`; chaves desbalanceadas. Política: **erro > chute, sempre**.
+- **Group do usuário vira nó OPACO** (não quebra mais): o cabeçalho do `Group {...}` vira um nó com `note` "Group do usuário — conteúdo não expandido (K nós internos)" + warning; o corpo (nós internos, `set`/`push` internos, Groups aninhados) é pulado até o `end_group` casado sem tocar a pilha externa. Fiel à semântica: o grupo ocupa exatamente 1 slot da pilha (prova no paste real: `set N… [stack 0]` logo após o `end_group`). No export, vira `NoOp` placeholder (mesmo nome, label "era um Group do usuário", comentário `#` de aviso) — o `.nk` exportado continua válido e a topologia se preserva. Os ~261 gizmos NST do pipeline expandem como Group no copy/paste, então isso destrava a maior parte dos pastes reais do estúdio.
+- **Continua fatal (ambiguidade real):** classe desconhecida sem knob `inputs`; `clone`; `end_group` órfão (trecho começando no meio de um Group); Group sem `end_group` casado (trecho cortado); Group **sem** knob `inputs` (pendente: medir o default com `probe_group_inputs.py`); Group com 2+ inputs (não representável no schema A/B/mask/input); chaves desbalanceadas. Política: **erro > chute, sempre**.
 
 ## Aridade de inputs — resolução em cadeia de prioridade
 
@@ -75,6 +76,7 @@
 
 - Fluxo top-down; cores por classe: Merge laranja `#d98a2b`, Grade/color azul `#4d7ab5`, Expression verde-água `#2fa890`, Shuffle/channel vermelho-escuro `#8a2f2f`, Blur/filter roxo `#7a4f9e`, Read/plate cinza `#6b6b6b`.
 - **Âncora do Nuke:** nó 80×18, Dot 12×12, canto sup. esquerdo. Conversão para desenho alinha os **centros** (nós do viewer são maiores). `pos` no JSON fica verbatim.
+- **Export grava `inputs 0` explícito em nós sem conexões:** pela lei medida, bloco sem knob consome 1 (não-generators) — um nó desconectado exportado sem o knob roubaria um item da pilha no paste do usuário (bug latente revelado pela lei, corrigido junto com o suporte a Group).
 - **Export re-baseado em (0,0):** xpos/ypos convertidos de volta ao referencial Nuke e subtraído o mínimo — offsets relativos preservados, paste não voa para longe (caso real: `xpos -8857`).
 - **Mask:** entra pelo lado que **encara a fonte** (badge `m` acompanha); linha reta tracejada quando ambos têm `pos`, cotovelo lateral no layout automático. Pipes A/B com badges rotulados no topo.
 - **Dots:** círculo pequeno cinza (não retângulo). Opção "Colapsar Dots" religa consumidores à fonte real transitivamente (dots = geometria, não semântica); warnings para dots com label e cadeias soltas.
@@ -93,6 +95,8 @@
 Harness em Node: extrai as seções parser/export do HTML por regex (marcadores `importação .nk` … `fim importação .nk`), injeta stubs (`esc`, `isMergeClass`, `NODE_H`), roda asserts. Cobertura: round-trip parser↔export, fragmentos parciais, underflow determinístico, prioridade NK_USER, colapso de dots, pos verbatim, export zerado, ambiguidades fatais. **Regra aprendida:** fixtures devem imitar o formato real do Nuke (1 knob por linha; ordem de push correta) — dois bugs de fixture já ocorreram por desvio disso.
 
 ## Pendências / próximos passos possíveis
+
+- **Rodar `probe_group_inputs.py` no Nuke GUI** e ligar o resultado no parser: hoje Group **sem** knob `inputs` é fatal "pendente de medição". Hipótese (consistente com a lei e com o nodes2.txt): default 1, independente do nº de `Input`s internos — mas Groups ficaram fora da medição do v6, então não vai chute. Com o valor medido, o `nodes2.txt` importa inteiro (o Group dele é sem knob).
 
 - ~~Rodar `map_inputs_gui.py` e cruzar com a `NK_INPUTS`~~ **feito (v6)**: 40 divergências corrigidas, tabela reescrita com valores medidos, lei da aridade documentada acima. `Precomp:1` é o único valor extrapolado sem medição direta (expande como Group no copy/paste) — junto com as ~44 classes de versões antigas ausentes do menu 14.0v2 (extrapoladas pela lei).
 - ~~Carregar o `inputs_default.json` em runtime no viewer~~ **feito**: segundo upload ao lado do `nodes.json`. Prioridade de aridade: knob `inputs` do script → `NK_USER_INPUTS` (medido do usuário) → `NK_INPUTS` (embutida) → erro; valor `null` (medido como variável) continua erro pedindo knob explícito. O loader **valida âncoras no load** (Blur=1, Grade=1, Roto=1, Dot=1, Constant=0) e rejeita arquivos de medição quebrada — defesa contra o lixo que as v1–v3 do extractor produziam.
