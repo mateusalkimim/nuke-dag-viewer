@@ -203,21 +203,36 @@
 <script>
 'use strict';
 
-/* ================= cores por classe (convenção Nuke) ================= */
+/* ============== cores por classe (fábrica do Nuke, medidas) ==============
+   Re-semeada a partir de colors_default.json MEDIDO no Nuke 14.0v2
+   (map_colors_gui.py): cada regra reproduz a cor real da categoria no
+   Node Graph; verificada contra as 198 classes padrão medidas. A ordem
+   importa (primeira regra que casa vence). Default = #cccccc, o cinza
+   claro padrão do Nuke (Dot, Switch, Expression, Read, gizmos...). */
 const COLOR_RULES = [
-  [/merge|keymix|dissolve|switch/i,                                  '#d98a2b'], // laranja
-  [/expression/i,                                                    '#2fa890'], // verde-água
-  [/grade|colorcorrect|invert|saturat|hue|gamma|multiply|colorspace|gain|clamp|color/i, '#4d7ab5'], // azul
-  [/shuffle|copy(?!cat)|channel|remove|add(?!mix)/i,                 '#8a2f2f'], // vermelho-escuro
-  [/blur|defocus|erode|dilate|filter|median|sharpen|soften|edge/i,   '#7a4f9e'], // roxo
-  [/read|constant|checkerboard|plate/i,                              '#6b6b6b'], // cinza
+  [/^ocio/i,                                                         '#1caa98'], // OCIO
+  [/time|temporal|appendclip|cliptest|softclip|frame(blend|hold|range)/i, '#b0a45d'], // Time
+  [/^deep(?!read)/i,                                                 '#000060'], // Deep
+  [/^(camera|axis|light(?!wrap)|spotlight|directlight|environment|scene$|scanlinerender|readgeo|writegeo|card2?$|cube$|sphere$|cylinder$|transformgeo|displacegeo|editgeo|geoselect|mergegeo|uvproject|project3d|applymaterial|basicmaterial|phong|emission|diffuse|specular|normals)/i, '#006413'], // 3D
+  [/merge|keymix|addmix|mixviews/i,                                  '#4b5ec6'], // Merge
+  [/blur|defocus|erode|sharpen|soften|median|emboss|laplacian|glow|lightwrap|dustbust|colormatrix/i, '#cc804e'], // Filter
+  [/^(grade|colorcorrect|colorlookup|huecorrect|saturation|invert|clamp|multiply|histeq|histogram|matchgrade)$/i, '#7aa9ff'], // Color
+  [/^(transform|cornerpin|crop$|idistort|lensdistortion|mirror|reformat|stabilize|upscale|vectordistort|sphericaltransform)/i, '#a57aaa'], // Transform
+  [/^(copy(bbox|cat|metadata)?$|shuffle|remove$)/i,                  '#9e3c63'], // Channel
+  [/keyer$|cryptomatte|primatte|^ibk/i,                              '#00ff00'], // Keyer
+  [/^roto/i,                                                         '#71c671'], // Roto
+  [/^(radial|ramp$|rectangle|text|copyrectangle)/i,                  '#c0c0c0'], // Draw
+  [/^write$/i,                                                       '#bfbf00'],
+  [/^contactsheet$/i,                                                '#ff69f7'],
+  [/^diskcache$/i,                                                   '#00ffff'],
+  [/^volumerays$/i,                                                  '#c29b53'],
 ];
 /* Cores medidas do Nuke do usuário (colors_default.json, gerado por
    extractors/map_colors_gui.py) — prioridade sobre a paleta embutida.
    null/ausente cai nas COLOR_RULES por categoria. */
 let NK_USER_COLORS = null;
 const colorFor = cls => NK_USER_COLORS?.get(cls)
-  || (COLOR_RULES.find(([re]) => re.test(cls)) || [0,'#555555'])[1];
+  || (COLOR_RULES.find(([re]) => re.test(cls)) || [0,'#cccccc'])[1];
 const textColorFor = hex => {
   const n = parseInt(hex.slice(1),16);
   const L = .2126*(n>>16&255) + .7152*(n>>8&255) + .0722*(n&255);

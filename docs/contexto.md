@@ -74,7 +74,7 @@
 
 ## Geometria e fidelidade visual (paridade com o Nuke)
 
-- Fluxo top-down; cores por classe: Merge laranja `#d98a2b`, Grade/color azul `#4d7ab5`, Expression verde-água `#2fa890`, Shuffle/channel vermelho-escuro `#8a2f2f`, Blur/filter roxo `#7a4f9e`, Read/plate cinza `#6b6b6b`.
+- Fluxo top-down; **paleta embutida re-semeada com as cores de fábrica medidas** (`map_colors_gui.py`, fidelidade 198/198 classes padrão): Merge índigo `#4b5ec6`, Filter laranja `#cc804e`, Color azul-claro `#7aa9ff`, 3D verde `#006413`, Deep azul-escuro `#000060`, Time `#b0a45d`, Channel/Copy vinho `#9e3c63`, Keyer verde-vivo `#00ff00`, Roto `#71c671`, Transform lilás `#a57aaa`, OCIO `#1caa98`, default cinza-claro `#cccccc` (Dot, Switch, Expression, Read…). A paleta antiga ('convenção') divergia do Nuke real — ex.: Merge não é laranja, laranja é Filter; Dissolve/Switch/Expression são cinza.
 - **Cores reais do Nuke do usuário em runtime:** `colors_default.json` (gerado por `map_colors_gui.py`: knob `tile_color` se ≠0, senão `nuke.defaultNodeColor(classe)`, formato `0xRRGGBBAA`→`#rrggbb`, `null` = sem cor específica) carregado por upload, prioridade sobre a paleta embutida, repinta sem re-importar. O `textColorFor` (luminância) já garante legibilidade em cores claras.
 - **Âncora do Nuke:** nó 80×18, Dot 12×12, canto sup. esquerdo. Conversão para desenho alinha os **centros** (nós do viewer são maiores). `pos` no JSON fica verbatim.
 - **Export grava `inputs 0` explícito em nós sem conexões:** pela lei medida, bloco sem knob consome 1 (não-generators) — um nó desconectado exportado sem o knob roubaria um item da pilha no paste do usuário (bug latente revelado pela lei, corrigido junto com o suporte a Group).
