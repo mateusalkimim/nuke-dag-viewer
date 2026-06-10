@@ -139,6 +139,7 @@
   <button id="btnJson" aria-pressed="true">JSON</button>
   <button id="btnNk">Exportar .nk</button>
   <button id="btnTable">Tabela</button>
+  <button id="btnFeedback" title="JSON estruturado de erros/avisos — protocolo de correção para geração de .nk por LLM">Feedback LLM</button>
   <button id="btnFit" title="Enquadrar o grafo">Enquadrar</button>
 </header>
 
@@ -251,31 +252,90 @@ const NODE_H = 36, ROW_GAP = 112, COL_GAP = 46;
 const isMergeClass = cls => /merge|keymix/i.test(cls);
 const ALLOWED_KEYS = new Set(['A','B','mask','input']);
 
+/* ====== feedback estruturado (LLM) ====== */
+/* Canal paralelo aos banners HTML: cada erro/warning relevante vira um
+   objeto {type, node?, class?, knob?, suggestion?, valid_knobs?, detail}
+   exposto pelo botão "Feedback LLM" como JSON — protocolo de correção
+   para geração de .nk por modelo (ver llm/README.md). */
+const stripTags = s => String(s).replace(/<[^>]+>/g, '');
+function editDist(a, b){
+  const m = a.length, n = b.length;
+  if (!m || !n) return m || n;
+  let prev = Array.from({length: n + 1}, (_, j) => j);
+  for (let i = 1; i <= m; i++){
+    const cur = [i];
+    for (let j = 1; j <= n; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1,
+                        prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+function didYouMean(name, candidates){
+  let best = null, bd = Infinity;
+  const ln = String(name).toLowerCase();
+  for (const c of candidates){
+    const d = editDist(ln, String(c).toLowerCase());
+    if (d < bd){ bd = d; best = c; }
+  }
+  return (best != null && bd <= Math.max(2, Math.ceil(ln.length / 3))) ? best : null;
+}
+// knobs de infraestrutura presentes em todo nó: fora do hint
+const KNOB_BOILER = new Set(['name','help','onCreate','onDestroy','knobChanged',
+  'updateUI','autolabel','panel','tile_color','gl_color','label','note_font',
+  'note_font_size','note_font_color','selected','xpos','ypos','icon',
+  'indicators','hide_input','rootNodeUpdated','cached','disable','dope_sheet',
+  'bookmark','postage_stamp','postage_stamp_frame','lifetimeStart',
+  'lifetimeEnd','useLifetime']);
+function knobsHint(name, knobSet){
+  const arr = [...knobSet].filter(k => !KNOB_BOILER.has(k));
+  if (arr.length <= 40) return arr.sort();
+  const ln = String(name).toLowerCase();   // lista grande: top-5 por proximidade
+  return arr.map(k => [editDist(ln, k.toLowerCase()), k])
+            .sort((x, y) => x[0] - y[0]).slice(0, 5).map(x => x[1]);
+}
+let LLM_FEEDBACK = null;     // último resultado estruturado (botão "Feedback LLM")
+let PARSE_FEEDBACK = [];     // feedback do último import .nk (mesclado no render)
+function buildFeedback(stage, items){
+  return {
+    ok: !items.some(it => it.severity === 'error'),
+    stage,
+    errors: items.filter(it => it.severity === 'error')
+                 .map(({severity, ...rest}) => rest),
+    warnings: items.filter(it => it.severity === 'warning')
+                   .map(({severity, ...rest}) => rest),
+  };
+}
+
 function validate(data){
   const errors = [];
-  const E = (m) => errors.push(m);
-  if (!data || typeof data !== 'object') { E('JSON raiz deve ser um objeto.'); return {nodes:new Map(), order:[], backdrops:[], errors, warnings:[]}; }
-  const list = Array.isArray(data.nodes) ? data.nodes : (E('Campo "nodes" ausente ou não é array.'), []);
+  const feedback = [];
+  const E = (m, meta) => {
+    errors.push(m);
+    feedback.push({ severity: 'error', ...(meta || {type: 'invalid'}), detail: stripTags(m) });
+  };
+  if (!data || typeof data !== 'object') { E('JSON raiz deve ser um objeto.', {type:'json_root'}); return {nodes:new Map(), order:[], backdrops:[], errors, warnings:[], feedback}; }
+  const list = Array.isArray(data.nodes) ? data.nodes : (E('Campo "nodes" ausente ou não é array.', {type:'nodes_missing'}), []);
   const nodes = new Map();
 
   for (const raw of list){
-    if (!raw || typeof raw !== 'object'){ E('Entrada de nó inválida (não é objeto).'); continue; }
+    if (!raw || typeof raw !== 'object'){ E('Entrada de nó inválida (não é objeto).', {type:'node_invalid'}); continue; }
     const name = String(raw.name||'').trim();
-    if (!name){ E('Nó sem "name".'); continue; }
-    if (nodes.has(name)){ E(`Nome duplicado: <strong>${esc(name)}</strong>.`); continue; }
+    if (!name){ E('Nó sem "name".', {type:'missing_name'}); continue; }
+    if (nodes.has(name)){ E(`Nome duplicado: <strong>${esc(name)}</strong>.`, {type:'duplicate_name', node:name}); continue; }
     const cls = String(raw.class||'').trim();
-    if (!cls) E(`Nó <strong>${esc(name)}</strong> sem "class".`);
+    if (!cls) E(`Nó <strong>${esc(name)}</strong> sem "class".`, {type:'missing_class', node:name});
     const node = { name, cls: cls||'?', knobs: raw.knobs && typeof raw.knobs==='object' ? raw.knobs : {},
                    inputs: {}, note: raw.note ? String(raw.note) : '', invalid:false,
                    pos: (Array.isArray(raw.pos) && raw.pos.length===2 && raw.pos.every(v=>Number.isFinite(Number(v))))
                         ? raw.pos.map(Number) : null };
     const ins = raw.inputs && typeof raw.inputs==='object' ? raw.inputs : {};
     for (const k of Object.keys(ins)){
-      if (!ALLOWED_KEYS.has(k)){ E(`<strong>${esc(name)}</strong>: chave de input desconhecida "${esc(k)}" (use A, B, mask ou input).`); node.invalid=true; continue; }
+      if (!ALLOWED_KEYS.has(k)){ E(`<strong>${esc(name)}</strong>: chave de input desconhecida "${esc(k)}" (use A, B, mask ou input).`, {type:'unknown_input_key', node:name, key:k}); node.invalid=true; continue; }
       node.inputs[k] = String(ins[k]);
     }
     if (node.inputs.input && (node.inputs.A || node.inputs.B)){
-      E(`<strong>${esc(name)}</strong>: misturou "input" com A/B — escolha um esquema.`); node.invalid=true;
+      E(`<strong>${esc(name)}</strong>: misturou "input" com A/B — escolha um esquema.`, {type:'input_schema_mix', node:name}); node.invalid=true;
     }
     nodes.set(name, node);
   }
@@ -284,16 +344,18 @@ function validate(data){
   for (const node of nodes.values()){
     for (const [k,ref] of Object.entries(node.inputs)){
       if (!nodes.has(ref)){
-        E(`<strong>${esc(node.name)}</strong>: input ${k} aponta para nó inexistente "${esc(ref)}".`);
+        E(`<strong>${esc(node.name)}</strong>: input ${k} aponta para nó inexistente "${esc(ref)}".`, {type:'missing_ref', node:node.name, input:k, ref});
         node.invalid = true; node.inputs[k] = null; node['missing_'+k] = ref;
       }
     }
     const hasA = !!node.inputs.A, hasB = !!node.inputs.B;
     if (isMergeClass(node.cls) && !(hasA && hasB)){
-      E(`<strong>${esc(node.name)}</strong> (${esc(node.cls)}): Merge exige A <em>e</em> B declarados — ${!hasA?'falta A':''}${!hasA&&!hasB?' e ':''}${!hasB?'falta B':''}.`);
+      E(`<strong>${esc(node.name)}</strong> (${esc(node.cls)}): Merge exige A <em>e</em> B declarados — ${!hasA?'falta A':''}${!hasA&&!hasB?' e ':''}${!hasB?'falta B':''}.`,
+        {type:'merge_missing_input', node:node.name, class:node.cls,
+         missing:[!hasA && 'A', !hasB && 'B'].filter(Boolean)});
       node.invalid = true;
     } else if ((hasA !== hasB) && (hasA || hasB)){
-      E(`<strong>${esc(node.name)}</strong>: declarou só ${hasA?'A':'B'} — pipes A/B devem vir em par.`);
+      E(`<strong>${esc(node.name)}</strong>: declarou só ${hasA?'A':'B'} — pipes A/B devem vir em par.`, {type:'unpaired_ab', node:node.name});
       node.invalid = true;
     }
   }
@@ -303,7 +365,7 @@ function validate(data){
   for (const raw of (Array.isArray(data.backdrops)?data.backdrops:[])){
     if (!raw || typeof raw !== 'object') continue;
     const contains = (Array.isArray(raw.contains)?raw.contains:[]).filter(n=>{
-      if (!nodes.has(n)){ E(`Backdrop "${esc(String(raw.label||''))}": nó "${esc(String(n))}" não existe.`); return false; }
+      if (!nodes.has(n)){ E(`Backdrop "${esc(String(raw.label||''))}": nó "${esc(String(n))}" não existe.`, {type:'backdrop_missing_node', node:String(n)}); return false; }
       return true;
     });
     backdrops.push({ label:String(raw.label||''), contains });
@@ -329,7 +391,7 @@ function validate(data){
   }
   if (order.length < nodes.size){
     const cyc = [...nodes.keys()].filter(n=>!order.includes(n));
-    E(`Ciclo detectado envolvendo: <strong>${cyc.map(esc).join(', ')}</strong>.`);
+    E(`Ciclo detectado envolvendo: <strong>${cyc.map(esc).join(', ')}</strong>.`, {type:'cycle', nodes:cyc});
     for (const n of cyc){ nodes.get(n).invalid = true; order.push(n); }
   }
 
@@ -341,12 +403,18 @@ function validate(data){
       if (!u?.knobs) continue;
       for (const k of Object.keys(node.knobs)){
         const real = node.cls === 'Expression' ? (EXPR_MAP[k] || k) : k;
-        if (!u.knobs.has(real))
+        if (!u.knobs.has(real)){
           warnings.push(`<strong>${esc(node.name)}</strong>: knob "${esc(k)}" não existe em ${esc(node.cls)} no seu Nuke.`);
+          feedback.push({ severity:'warning', type:'unknown_knob',
+            node:node.name, class:node.cls, knob:k,
+            suggestion: didYouMean(real, u.knobs),
+            valid_knobs: knobsHint(real, u.knobs),
+            detail: `knob "${k}" não existe em ${node.cls} no seu Nuke` });
+        }
       }
     }
   }
-  return { nodes, order, backdrops, errors, warnings };
+  return { nodes, order, backdrops, errors, warnings, feedback };
 }
 
 /* ================= layout (top-down) ================= */
@@ -810,6 +878,10 @@ document.getElementById('btnNk').onclick = () => {
 document.getElementById('btnTable').onclick = () => {
   if (MODEL) openDrawer('Tabela de nós (inputs explícitos)', makeTable(MODEL));
 };
+document.getElementById('btnFeedback').onclick = () => {
+  openDrawer('Feedback estruturado (LLM)',
+    JSON.stringify(LLM_FEEDBACK ?? { ok: null, detail: 'nenhum import/render ainda' }, null, 2));
+};
 
 /* ================= painel JSON / render ================= */
 const errorsEl = document.getElementById('errors');
@@ -827,9 +899,12 @@ function doRender(first=false){
   catch (err){
     errorsEl.innerHTML = `<li><strong>JSON inválido:</strong> ${esc(err.message)}</li>`;
     errorsEl.classList.add('show');
+    LLM_FEEDBACK = buildFeedback('json', [{severity:'error', type:'invalid_json', detail: err.message}]);
     return;
   }
   const model = validate(data);
+  LLM_FEEDBACK = buildFeedback(PARSE_FEEDBACK.length ? 'parse+validate' : 'validate',
+                               [...PARSE_FEEDBACK, ...model.feedback]);
   layout(model);
   const names = new Set(model.nodes.keys());
   const newSet = (lastNames && !first)
@@ -848,7 +923,7 @@ function doRender(first=false){
   }
   if (first) requestAnimationFrame(fitView);
 }
-document.getElementById('btnRender').onclick = () => doRender(false);
+document.getElementById('btnRender').onclick = () => { PARSE_FEEDBACK = []; doRender(false); };
 
 /* ================= importação .nk (clipboard do Nuke) ================= */
 /* Semântica de pilha do Nuke: cada nó pope seus inputs; o TOPO da pilha
@@ -1116,8 +1191,15 @@ const NK_DROP = new Set(['name','xpos','ypos','selected','inputs','addUserKnob',
 const EXPR_UNMAP = { expr0:'expr_r', expr1:'expr_g', expr2:'expr_b', expr3:'expr_a' };
 
 function parseNK(text){
-  const errors = [], warnings = [];
-  const fatal = m => errors.push(m);
+  const errors = [], warnings = [], feedback = [];
+  const fatal = (m, meta) => {
+    errors.push(m);
+    feedback.push({ severity:'error', ...(meta || {type:'parse_error'}), detail: stripTags(m) });
+  };
+  const warn = (m, meta) => {
+    warnings.push(m);
+    feedback.push({ severity:'warning', ...(meta || {type:'aviso'}), detail: stripTags(m) });
+  };
   const stack = [];
   const vars = Object.create(null);
   const out = [], used = new Set();
@@ -1141,17 +1223,17 @@ function parseNK(text){
       if (v === undefined){
         stack.push(EXT);   // definida fora do trecho colado: conexão externa
         if (m[1] !== 'cut_paste_input')
-          warnings.push(`push $${esc(m[1])}: variável definida fora do trecho colado — tratada como conexão externa.`);
+          warn(`push $${esc(m[1])}: variável definida fora do trecho colado — tratada como conexão externa.`, {type:'external_var', var:m[1]});
       } else stack.push(v);
       continue;
     }
     if (/^push\s+0$/.test(t)){ stack.push(null); continue; }
-    if (/^clone\b/.test(t)){ fatal('Script contém <strong>clone</strong> — não suportado pelo importador.'); break; }
-    if (/^end_group\b/.test(t)){ fatal('<code>end_group</code> sem <strong>Group</strong> correspondente — o trecho colado começa no meio de um Group; copie o Group inteiro.'); break; }
+    if (/^clone\b/.test(t)){ fatal('Script contém <strong>clone</strong> — não suportado pelo importador.', {type:'clone_unsupported'}); break; }
+    if (/^end_group\b/.test(t)){ fatal('<code>end_group</code> sem <strong>Group</strong> correspondente — o trecho colado começa no meio de um Group; copie o Group inteiro.', {type:'orphan_end_group'}); break; }
 
     if (/^add_layer\s*\{/.test(t)){
       const cap = captureBraced(text, startPos + line.indexOf('{'));
-      if (!cap){ fatal('add_layer com chaves desbalanceadas.'); break; }
+      if (!cap){ fatal('add_layer com chaves desbalanceadas.', {type:'unbalanced_braces'}); break; }
       pos = afterLine(text, cap.end);
       continue;
     }
@@ -1159,17 +1241,17 @@ function parseNK(text){
     if ((m = t.match(/^([A-Za-z_][\w.]*)\s*\{/))){
       const cls = m[1];
       const cap = captureBraced(text, startPos + line.indexOf('{'));
-      if (!cap){ fatal(`Bloco de <strong>${esc(cls)}</strong> com chaves desbalanceadas.`); break; }
+      if (!cap){ fatal(`Bloco de <strong>${esc(cls)}</strong> com chaves desbalanceadas.`, {type:'unbalanced_braces', class:cls}); break; }
       pos = afterLine(text, cap.end);
       const pk = parseKnobBlock(cap.inner);
-      if (pk.error){ fatal(`${esc(cls)}: ${esc(pk.error)}.`); break; }
+      if (pk.error){ fatal(`${esc(cls)}: ${esc(pk.error)}.`, {type:'knob_block_error', class:cls}); break; }
       const knobs = pk.knobs;
 
       if (cls === 'BackdropNode'){
-        warnings.push(`BackdropNode "${esc(knobs.label||'')}" ignorado — descreva-o via "backdrops" no JSON.`);
+        warn(`BackdropNode "${esc(knobs.label||'')}" ignorado — descreva-o via "backdrops" no JSON.`, {type:'backdrop_ignored'});
         continue;
       }
-      if (cls === 'Viewer'){ warnings.push('Viewer ignorado.'); continue; }
+      if (cls === 'Viewer'){ warn('Viewer ignorado.', {type:'viewer_ignored'}); continue; }
 
       /* Group do usuário → nó OPACO: o cabeçalho vira o nó; o corpo
          (nós internos, set/push internos, Groups aninhados) é pulado em
@@ -1189,14 +1271,14 @@ function parseNK(text){
           if (hm){
             if (hm[1] === 'Group') gdepth++; else internos++;
             const cap2 = captureBraced(text, pos + l2.indexOf('{'));
-            if (!cap2){ fatal(`Group <strong>${esc(String(knobs.name||''))}</strong>: bloco interno de <strong>${esc(hm[1])}</strong> com chaves desbalanceadas.`); break; }
+            if (!cap2){ fatal(`Group <strong>${esc(String(knobs.name||''))}</strong>: bloco interno de <strong>${esc(hm[1])}</strong> com chaves desbalanceadas.`, {type:'unbalanced_braces', node:String(knobs.name||'')}); break; }
             pos = afterLine(text, cap2.end);
             continue;
           }
           pos = e2 + 1;   // set/push/linhas internas: ignoradas de propósito
         }
         if (!errors.length && gdepth > 0)
-          fatal(`Group <strong>${esc(String(knobs.name||''))}</strong> sem <code>end_group</code> casado — o trecho colado está incompleto.`);
+          fatal(`Group <strong>${esc(String(knobs.name||''))}</strong> sem <code>end_group</code> casado — o trecho colado está incompleto.`, {type:'group_unclosed', node:String(knobs.name||'')});
         if (errors.length) break;
         groupInternos = internos;
       }
@@ -1205,7 +1287,7 @@ function parseNK(text){
       let main, maskC = 0;
       if (knobs.inputs != null){
         const im = String(knobs.inputs).match(/^(\d+)\s*(?:\+\s*(\d+))?$/);
-        if (!im){ fatal(`${esc(cls)}: knob inputs "${esc(knobs.inputs)}" não reconhecido.`); break; }
+        if (!im){ fatal(`${esc(cls)}: knob inputs "${esc(knobs.inputs)}" não reconhecido.`, {type:'bad_inputs_knob', class:cls, value:String(knobs.inputs)}); break; }
         main = +im[1]; maskC = +(im[2] || 0);
       } else if (cls === 'Group'){
         // MEDIDO (probe_group_inputs.py): Group sem knob consome 1 da
@@ -1217,19 +1299,23 @@ function parseNK(text){
       } else if (cls in NK_INPUTS){
         main = NK_INPUTS[cls];
       } else if (NK_USER_INPUTS?.has(cls)){
-        fatal(`Classe <strong>${esc(cls)}</strong> medida como aridade <strong>variável/indeterminada</strong> no seu inputs_default.json e sem knob <code>inputs</code> no script — número de inputs consumidos da pilha é ambíguo. Adicione <code>inputs N</code> ao bloco.`);
+        fatal(`Classe <strong>${esc(cls)}</strong> medida como aridade <strong>variável/indeterminada</strong> no seu inputs_default.json e sem knob <code>inputs</code> no script — número de inputs consumidos da pilha é ambíguo. Adicione <code>inputs N</code> ao bloco.`, {type:'ambiguous_arity', class:cls});
         break;
       } else if (NK_USER?.has(cls)){
         const u = NK_USER.get(cls);
-        fatal(`Classe <strong>${esc(cls)}</strong> consta no seu nodes.json (inputs ${u.min}–${u.max}, contando opcionais) mas não está na tabela embutida e o script não traz o knob <code>inputs</code> — aridade default ambígua. Adicione <code>inputs N</code> ao bloco.`);
+        fatal(`Classe <strong>${esc(cls)}</strong> consta no seu nodes.json (inputs ${u.min}–${u.max}, contando opcionais) mas não está na tabela embutida e o script não traz o knob <code>inputs</code> — aridade default ambígua. Adicione <code>inputs N</code> ao bloco.`, {type:'ambiguous_arity', class:cls, min_inputs:u.min, max_inputs:u.max});
         break;
       } else {
-        fatal(`Classe <strong>${esc(cls)}</strong> desconhecida e sem knob <code>inputs</code> — número de inputs consumidos da pilha é ambíguo; não vou chutar. Adicione <code>inputs N</code> ao bloco, ou carregue o <code>inputs_default.json</code> gerado pelo <code>extractors/map_inputs_gui.py</code> (aridade medida do seu Nuke).`);
+        fatal(`Classe <strong>${esc(cls)}</strong> desconhecida e sem knob <code>inputs</code> — número de inputs consumidos da pilha é ambíguo; não vou chutar. Adicione <code>inputs N</code> ao bloco, ou carregue o <code>inputs_default.json</code> gerado pelo <code>extractors/map_inputs_gui.py</code> (aridade medida do seu Nuke).`,
+          {type:'unknown_class', class:cls,
+           suggestion: didYouMean(cls, [...Object.keys(NK_INPUTS),
+             ...(NK_USER_INPUTS ? NK_USER_INPUTS.keys() : []),
+             ...(NK_USER ? NK_USER.keys() : [])])});
         break;
       }
-      if (maskC > 1){ fatal(`${esc(cls)}: inputs ${main}+${maskC} (múltiplas máscaras) não suportado.`); break; }
+      if (maskC > 1){ fatal(`${esc(cls)}: inputs ${main}+${maskC} (múltiplas máscaras) não suportado.`, {type:'multi_mask', class:cls}); break; }
       if (cls === 'Group' && main + maskC > 1){
-        fatal(`Group <strong>${esc(String(knobs.name||''))}</strong> com <code>inputs ${esc(String(knobs.inputs))}</code> — Group opaco só é representável com 0 ou 1 input (schema canônico A/B/mask/input).`);
+        fatal(`Group <strong>${esc(String(knobs.name||''))}</strong> com <code>inputs ${esc(String(knobs.inputs))}</code> — Group opaco só é representável com 0 ou 1 input (schema canônico A/B/mask/input).`, {type:'group_too_many_inputs', node:String(knobs.name||''), value:String(knobs.inputs)});
         break;
       }
 
@@ -1245,7 +1331,7 @@ function parseNK(text){
       const assign = (v, label) => {
         if (v === null) return;                       // push 0 = desconectado de propósito
         if (v === EXT){
-          warnings.push(`<strong>${esc(dispName)}</strong>: input <strong>${label}</strong> vem de fora do trecho colado — deixado desconectado.`);
+          warn(`<strong>${esc(dispName)}</strong>: input <strong>${label}</strong> vem de fora do trecho colado — deixado desconectado.`, {type:'external_input', node:dispName, input:label});
           return;
         }
         inputs[label] = v;
@@ -1256,7 +1342,7 @@ function parseNK(text){
         assign(popped[0], 'B'); assign(popped[1], 'A'); assign(popped[2], 'mask');
       }
       else if (main >= 3){
-        fatal(`<strong>${esc(dispName)}</strong>: ${main} inputs principais não são representáveis no schema canônico (A/B/mask/input) — mapeamento ambíguo.`);
+        fatal(`<strong>${esc(dispName)}</strong>: ${main} inputs principais não são representáveis no schema canônico (A/B/mask/input) — mapeamento ambíguo.`, {type:'not_representable', node:dispName, class:cls, inputs:main});
         break;
       }
       if (maskC) assign(popped[total-1], 'mask');
@@ -1265,7 +1351,7 @@ function parseNK(text){
       let name = String(knobs.name || '').trim() || cls + (out.length + 1);
       const base = name; let c = 2;
       while (used.has(name)){ name = `${base}_${c++}`; }
-      if (name !== base) warnings.push(`Nome duplicado "${esc(base)}" renomeado para "${esc(name)}".`);
+      if (name !== base) warn(`Nome duplicado "${esc(base)}" renomeado para "${esc(name)}".`, {type:'duplicate_renamed', from:base, to:name});
       used.add(name);
 
       /* knobs limpos (xpos/ypos/selected etc. ficam de fora; label vira note) */
@@ -1284,18 +1370,18 @@ function parseNK(text){
       if (groupInternos >= 0){
         const desc = `Group do usuário — conteúdo não expandido (${groupInternos} nós internos)`;
         node.note = knobs.label ? `${knobs.label} — ${desc}` : desc;
-        warnings.push(`<strong>${esc(name)}</strong>: Group importado como nó opaco — ${groupInternos} nós internos ocultos.`);
+        warn(`<strong>${esc(name)}</strong>: Group importado como nó opaco — ${groupInternos} nós internos ocultos.`, {type:'opaque_group', node:name, hidden_nodes:groupInternos});
       }
       out.push(node);
       stack.push(name);
       continue;
     }
 
-    warnings.push(`Linha ignorada: <code>${esc(t.slice(0, 60))}</code>`);
+    warn(`Linha ignorada: <code>${esc(t.slice(0, 60))}</code>`, {type:'line_ignored'});
   }
 
-  if (!out.length && !errors.length) errors.push('Nenhum nó encontrado no texto colado.');
-  return { errors, warnings, json: { nodes: out, backdrops: [] } };
+  if (!out.length && !errors.length) fatal('Nenhum nó encontrado no texto colado.', {type:'empty'});
+  return { errors, warnings, feedback, json: { nodes: out, backdrops: [] } };
 }
 function afterLine(text, idx){
   const nl = text.indexOf('\n', idx);
@@ -1348,6 +1434,8 @@ document.getElementById('btnImport').onclick = () => {
       res.errors.map(m => `<li><strong>Importação .nk:</strong> ${m}</li>`).join('') +
       res.warnings.map(m => `<li class="warn">${m}</li>`).join('');
     errorsEl.classList.add('show');
+    PARSE_FEEDBACK = res.feedback;
+    LLM_FEEDBACK = buildFeedback('parse', res.feedback);
     return;
   }
   jsonInput.value = '';
@@ -1361,10 +1449,14 @@ document.getElementById('btnImport').onclick = () => {
       res.warnings.push(`${c.removed} Dot(s) colapsado(s) — consumidores religados à fonte real. Desmarque "Colapsar Dots" para mantê-los.`);
     if (c.labeled.length)
       res.warnings.push(`Dots com label removidos no colapso: <strong>${c.labeled.map(esc).join(', ')}</strong> — o texto deles se perdeu.`);
-    for (const d of c.dangling)
+    for (const d of c.dangling){
       res.warnings.push(`<strong>${esc(d)}</strong>: apontava para cadeia de Dots sem fonte — deixado desconectado.`);
+      res.feedback.push({ severity:'warning', type:'dot_dangling', input:d,
+        detail:`${d}: apontava para cadeia de Dots sem fonte — deixado desconectado.` });
+    }
   }
   jsonInput.value = JSON.stringify(json, null, 2);
+  PARSE_FEEDBACK = res.feedback;
   doRender(false);
   if (res.warnings.length){
     errorsEl.innerHTML += res.warnings.map(m => `<li class="warn">${m}</li>`).join('');

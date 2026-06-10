@@ -91,6 +91,10 @@
 - Nós novos entre renders pulsam em amarelo (estático com `prefers-reduced-motion`).
 - BackdropNode e Viewer são ignorados com warning no import (backdrops se recriam via JSON).
 
+## Feedback estruturado (LLM)
+
+Canal paralelo aos banners HTML: `parseNK` e `validate` coletam objetos `{type, node?, class?, knob?, suggestion?, valid_knobs?, detail}`; o botão **Feedback LLM** abre o drawer com o JSON do último import/render (`{ok, stage, errors, warnings}`) para o loop de correção da geração de .nk por modelo. Did-you-mean por distância de edição para classe (contra tabela embutida + JSONs carregados) e knob (contra o `nodes.json`, com `valid_knobs` completo ≤40 ou top-5, excluindo knobs de infraestrutura). Schema e lista de tipos: `llm/README.md`.
+
 ## Metodologia de teste
 
 Harness em Node: extrai as seções parser/export do HTML por regex (marcadores `importação .nk` … `fim importação .nk`), injeta stubs (`esc`, `isMergeClass`, `NODE_H`), roda asserts. Cobertura: round-trip parser↔export, fragmentos parciais, underflow determinístico, prioridade NK_USER, colapso de dots, pos verbatim, export zerado, ambiguidades fatais. **Regra aprendida:** fixtures devem imitar o formato real do Nuke (1 knob por linha; ordem de push correta) — dois bugs de fixture já ocorreram por desvio disso.

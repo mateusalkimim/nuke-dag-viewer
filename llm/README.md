@@ -32,6 +32,42 @@ Nuke) válido, usando o catálogo medido do projeto.
   (TCL bruto custa ~60× mais tokens por causa de curvas de Roto), com
   knobs pesados elididos — nós elididos são intocáveis em conteúdo.
 
+## Protocolo de erro do validador (loop de correção)
+
+O viewer expõe o botão **Feedback LLM** (header): JSON estruturado do
+último import/render, para colar de volta no modelo. Os banners HTML
+continuam como estavam — o canal estruturado é paralelo.
+
+```json
+{
+  "ok": false,
+  "stage": "parse | validate | parse+validate | json",
+  "errors":   [ {"type": "...", "node": "...", "class": "...", "detail": "..."} ],
+  "warnings": [ ... ]
+}
+```
+
+Campos extras por tipo: `unknown_class` → `suggestion` (did-you-mean
+contra tabela embutida + JSONs carregados); `unknown_knob` → `suggestion`
++ `valid_knobs` (lista completa se a classe tem ≤40 knobs úteis, senão
+top-5 por distância de edição; knobs de infraestrutura como
+name/xpos/tile_color ficam fora); `merge_missing_input` → `missing`
+(["A"]…); `missing_ref` → `input`, `ref`; `ambiguous_arity` →
+`min_inputs`/`max_inputs` quando conhecidos; `opaque_group` →
+`hidden_nodes`; `duplicate_renamed` → `from`, `to`; `external_input` →
+`input`; `not_representable` → `inputs`.
+
+Tipos de erro: `unknown_class`, `unknown_knob`*, `ambiguous_arity`,
+`bad_inputs_knob`, `multi_mask`, `not_representable`, `merge_missing_input`,
+`missing_ref`, `duplicate_name`, `unknown_input_key`, `input_schema_mix`,
+`unpaired_ab`, `cycle`, `group_too_many_inputs`, `group_unclosed`,
+`orphan_end_group`, `clone_unsupported`, `unbalanced_braces`,
+`knob_block_error`, `invalid_json`, `empty`. Tipos de warning:
+`unknown_knob`*, `external_input`, `external_var`, `duplicate_renamed`,
+`opaque_group`, `backdrop_ignored`, `viewer_ignored`, `line_ignored`,
+`dot_dangling`. (*`unknown_knob` é warning — knob errado não quebra a
+topologia, mas o LLM deve corrigir.)
+
 Regenerar após atualizar os dumps de `data/`:
 
 ```sh
