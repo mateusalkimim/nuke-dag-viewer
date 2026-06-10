@@ -1,4 +1,4 @@
-# map_inputs_gui.py (v5)
+# map_inputs_gui.py (v6)
 # Uso: abra o Nuke normalmente (GUI), abra o Script Editor, cole este
 # arquivo inteiro e rode (Ctrl+Enter).
 #
@@ -13,24 +13,26 @@
 #  v3: o lado do SERIALIZADOR (quando o nodeCopy omite o knob) nao e'
 #      confiavel nem em selecao multi-no -> medimos o lado do PASTE.
 #  v4: a medicao deu {0,1} para todas as 423 classes — compativel com
-#      DOIS modelos: (A) default universal <=1, real; (B) artefato — se
-#      o paste ignorou o "inputs 0" dos Dots de lastro, eles se
-#      encadearam e a pilha tinha 1 item so, capando tudo em 1.
+#      dois modelos: default universal <=1 (real) ou Dots de lastro
+#      encadeados (artefato).
+#  v5: lastro de Constant + SELF-TEST com knob explicito (inputs 2/3
+#      medem 2/3) provou: pilha funciona, contagem funciona, e Merge2/
+#      ChannelMerge/Keymix sem knob consomem 1 (modelo A confirmado para
+#      classes 2D). MAS Constant e' no de imagem: inputs TIPADOS de
+#      classes 3D/Deep/particle rejeitam a conexao no paste e mediram 0
+#      falso (94 classes a mais que na v4, ex. Camera3).
 #
-# A v5 DISCRIMINA os dois modelos:
-#  - lastro de Constant (maxInputs=0: incapaz de encadear, com ou sem
-#    knob) no lugar de Dot;
-#  - SELF-TEST antes do loop: cola "Merge2 {inputs 2}" e
-#    "Keymix {inputs 3}" sinteticos e exige medicao 2 e 3 — prova que o
-#    lastro fornece multiplos itens e que a contagem funciona. Se
-#    falhar, aborta sem escrever nada.
+# A v6 fecha: lastro de DOT (conector universal: 2D, 3D, Deep, particle)
+# com o MESMO self-test — que tambem detecta encadeamento de Dots: se o
+# "inputs 0" do lastro fosse ignorado, a pilha teria 1 item e o
+# self-test "inputs 2" mediria 1 -> aborta sem escrever.
 #
 # Metodo, por classe:
 #   1. cria o node, serializa so ele (nodeCopy), extrai o bloco e REMOVE
 #      as linhas " inputs N" de nivel superior; deleta o node. Se a
 #      copia contem "end_group", a classe e' um gizmo que expande como
 #      Group -> fora do escopo da tabela, pula.
-#   2. cola (nodePaste) 6 Constants de lastro + o bloco sem knob.
+#   2. cola (nodePaste) 6 Dots de lastro + o bloco sem knob.
 #   3. aridade default = numero de inputs conectados do no colado.
 #   4. deleta os nos colados.
 #
@@ -57,7 +59,8 @@ def _nkprobe_main():
     anchors = {"Constant": 0, "Blur": 1, "Grade": 1, "Roto": 1, "Dot": 1}
     # hipoteses da tabela antiga — so informativo, nao gate
     informative = ["Merge2", "ChannelMerge", "Keymix", "Copy", "Switch",
-                   "Camera3", "RotoPaint", "Precomp"]
+                   "Camera3", "RotoPaint", "Precomp", "TransformGeo",
+                   "DeepMerge", "ScanlineRender", "Scene"]
 
     inputs_re = re.compile(r"^ inputs (\d+)$")
     name_re = re.compile(r"^ name (\S+)$")
@@ -129,11 +132,15 @@ def _nkprobe_main():
         return target_block, has_end_group
 
     def paste_and_count(block_lines, probe_name):
-        """Cola lastro de Constants + bloco; devolve o numero de inputs
+        """Cola lastro de Dots + bloco; devolve o numero de inputs
         conectados do no colado. Limpa tudo que colou."""
         snippet = []
         for j in range(N_BALLAST):
-            snippet.append("Constant {")
+            # Dot = conector universal (Constant, 2D, e' rejeitado por
+            # inputs tipados 3D/Deep — licao da v5). O self-test abaixo
+            # garante que os Dots nao se encadeiam.
+            snippet.append("Dot {")
+            snippet.append(" inputs 0")
             snippet.append(" name NKPROBE_C%d" % j)
             snippet.append("}")
         snippet.extend(block_lines)
