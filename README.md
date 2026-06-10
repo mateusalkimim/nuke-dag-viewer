@@ -91,6 +91,9 @@ extractors/               scripts que extraem metadados do SEU Nuke
   map_inputs_gui.py         aridade default por classe (paste-oráculo)
   map_colors_gui.py         cor de tile por classe
   probe_group_inputs.py     diagnóstico pontual da aridade de Group
+llm/                      geração de .nk por LLM
+  build_mvp_subset.py       subset curado validado contra o catálogo
+  mvp_subset.json           33 classes / ~2k tokens, inline em prompt
 data/                     dumps gerados (locais, fora do git)
 tests/fixtures/           trechos .nk reais (locais, fora do git)
 ```

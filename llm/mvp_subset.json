@@ -1,0 +1,454 @@
+{
+  "_meta": {
+    "arity_default_null": "classe nao medida pelo map_inputs_gui (lei extrapolada: 1); irrelevante para geracao — o dialeto sempre grava o knob inputs explicito",
+    "classes": 33,
+    "generator": "llm/build_mvp_subset.py",
+    "purpose": "referencia curada p/ system prompt de geracao .nk",
+    "source": "data/nodes.json + data/inputs_default.json (medidos, Nuke 14.0v2)"
+  },
+  "classes": {
+    "Blur": {
+      "arity_default": 1,
+      "knobs": [
+        "channels",
+        "size",
+        "filter",
+        "quality",
+        "crop",
+        "mix"
+      ],
+      "mask_input": 1,
+      "max_inputs": 2
+    },
+    "ChannelMerge": {
+      "arity_default": 1,
+      "input_labels": [
+        "B",
+        "A"
+      ],
+      "knobs": [
+        "operation"
+      ],
+      "mask_input": 2,
+      "max_inputs": 3,
+      "notes": "input0=B, input1=A; knob \"inputs 2\" obrigatorio com A e B."
+    },
+    "ColorCorrect": {
+      "arity_default": 1,
+      "knobs": [
+        "channels",
+        "saturation",
+        "contrast",
+        "gamma",
+        "gain",
+        "offset",
+        "unpremult",
+        "mix"
+      ],
+      "mask_input": 1,
+      "max_inputs": 2
+    },
+    "Constant": {
+      "arity_default": 0,
+      "knobs": [
+        "color",
+        "channels",
+        "format"
+      ],
+      "mask_input": 0,
+      "max_inputs": 0,
+      "notes": "Generator (aridade 0)."
+    },
+    "Copy": {
+      "arity_default": 1,
+      "knobs": [
+        "from0",
+        "to0",
+        "from1",
+        "to1",
+        "from2",
+        "to2",
+        "from3",
+        "to3",
+        "channels"
+      ],
+      "mask_input": 2,
+      "max_inputs": 3
+    },
+    "CornerPin2D": {
+      "arity_default": 1,
+      "knobs": [
+        "to1",
+        "to2",
+        "to3",
+        "to4",
+        "from1",
+        "from2",
+        "from3",
+        "from4",
+        "invert",
+        "filter",
+        "motionblur"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1
+    },
+    "Crop": {
+      "arity_default": 1,
+      "knobs": [
+        "box",
+        "softness",
+        "reformat",
+        "intersect",
+        "crop"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1
+    },
+    "Defocus": {
+      "arity_default": 1,
+      "knobs": [
+        "channels",
+        "defocus",
+        "ratio",
+        "scale",
+        "quality",
+        "method",
+        "mix"
+      ],
+      "mask_input": 1,
+      "max_inputs": 2
+    },
+    "Dot": {
+      "arity_default": 1,
+      "knobs": [],
+      "mask_input": 1,
+      "max_inputs": 1,
+      "notes": "So roteamento/legibilidade; usar knob \"label\" para anotar."
+    },
+    "EdgeBlur": {
+      "arity_default": 1,
+      "knobs": [
+        "size",
+        "filter"
+      ],
+      "mask_input": 1,
+      "max_inputs": 2
+    },
+    "Expression": {
+      "arity_default": 1,
+      "knobs": [
+        "expr0",
+        "expr1",
+        "expr2",
+        "expr3"
+      ],
+      "mask_input": 1,
+      "max_inputs": 2,
+      "notes": "Aliases do viewer: expr_r/g/b/a <-> expr0..3 (conversao nos dois sentidos no JSON canonico)."
+    },
+    "FilterErode": {
+      "arity_default": 1,
+      "knobs": [
+        "channels",
+        "size",
+        "filter"
+      ],
+      "mask_input": 1,
+      "max_inputs": 2
+    },
+    "Grade": {
+      "arity_default": 1,
+      "knobs": [
+        "channels",
+        "blackpoint",
+        "whitepoint",
+        "black",
+        "white",
+        "multiply",
+        "add",
+        "gamma",
+        "reverse",
+        "black_clamp",
+        "white_clamp",
+        "unpremult",
+        "invert_mask",
+        "mix"
+      ],
+      "mask_input": 1,
+      "max_inputs": 2
+    },
+    "IBKColourV3": {
+      "arity_default": null,
+      "knobs": [
+        "screen_type",
+        "mult"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1,
+      "menu": "IBKColour",
+      "notes": "Par com IBKGizmoV3 (workflow IBK)."
+    },
+    "IBKGizmoV3": {
+      "arity_default": null,
+      "knobs": [
+        "st",
+        "red_weight",
+        "lm_enable"
+      ],
+      "mask_input": 3,
+      "max_inputs": 3,
+      "menu": "IBKGizmo",
+      "notes": "inputs 2 tipicamente: input0=plate, input1=IBKColourV3."
+    },
+    "Keyer": {
+      "arity_default": 1,
+      "knobs": [
+        "input",
+        "output",
+        "operation",
+        "range"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1
+    },
+    "Keymix": {
+      "arity_default": 1,
+      "input_labels": [
+        "B",
+        "A",
+        "mask"
+      ],
+      "knobs": [
+        "channels",
+        "invertMask",
+        "mix",
+        "bbox"
+      ],
+      "mask_input": 3,
+      "max_inputs": 3,
+      "notes": "3 inputs nativos: input0=B, input1=A, input2=mask — knob \"inputs 3\" obrigatorio quando os 3 conectados."
+    },
+    "Merge2": {
+      "arity_default": 1,
+      "input_labels": [
+        "B",
+        "A",
+        "mask"
+      ],
+      "knobs": [
+        "operation",
+        "mix",
+        "bbox",
+        "also_merge",
+        "screen_alpha",
+        "output"
+      ],
+      "mask_input": 2,
+      "max_inputs": 101,
+      "menu": "Merge",
+      "notes": "input0=B, input1=A, input2=mask. Com 2+ inputs conectados o knob \"inputs\" e' OBRIGATORIO (\"2\" ou \"2+1\" com mask)."
+    },
+    "Multiply": {
+      "arity_default": 1,
+      "knobs": [
+        "channels",
+        "value",
+        "invert_mask",
+        "mix",
+        "unpremult"
+      ],
+      "mask_input": 1,
+      "max_inputs": 2
+    },
+    "OFXuk.co.thefoundry.keylight.keylight_v201": {
+      "arity_default": 1,
+      "knobs": [
+        "screenColour",
+        "screenGain",
+        "screenBalance",
+        "alphaBias",
+        "despillBias",
+        "preBlur",
+        "screenClipMin",
+        "screenClipMax",
+        "screenGrowShrink",
+        "screenSoftness"
+      ],
+      "mask_input": 4,
+      "max_inputs": 4,
+      "menu": "Keylight",
+      "notes": "Classe OFX: usar o nome completo no TCL."
+    },
+    "Premult": {
+      "arity_default": 1,
+      "knobs": [
+        "channels",
+        "alpha"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1
+    },
+    "Primatte3": {
+      "arity_default": 1,
+      "knobs": [
+        "algorithm",
+        "mode",
+        "output_mode",
+        "spill",
+        "matte",
+        "detail",
+        "crop",
+        "invert_mask"
+      ],
+      "mask_input": 2,
+      "max_inputs": 3,
+      "menu": "Primatte"
+    },
+    "Read": {
+      "arity_default": 0,
+      "knobs": [
+        "file",
+        "first",
+        "last",
+        "origfirst",
+        "origlast",
+        "frame_mode",
+        "frame",
+        "on_error",
+        "colorspace",
+        "premultiplied",
+        "raw"
+      ],
+      "max_inputs": 0,
+      "notes": "Generator (aridade 0). file usa caminho com padding #### ou %04d."
+    },
+    "Reformat": {
+      "arity_default": 1,
+      "knobs": [
+        "type",
+        "format",
+        "scale",
+        "resize",
+        "center",
+        "flip",
+        "flop",
+        "turn",
+        "filter",
+        "black_outside",
+        "pbb"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1
+    },
+    "Retime": {
+      "arity_default": 1,
+      "knobs": [
+        "speed",
+        "reverse",
+        "filter",
+        "before",
+        "after"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1
+    },
+    "Roto": {
+      "arity_default": 1,
+      "knobs": [
+        "output"
+      ],
+      "mask_input": 1,
+      "max_inputs": 5,
+      "notes": "NUNCA gerar o knob \"curves\" (irrepresentavel; o artista desenha). Gerar no vazio como placeholder nomeado."
+    },
+    "RotoPaint": {
+      "arity_default": 1,
+      "knobs": [
+        "output"
+      ],
+      "mask_input": 1,
+      "max_inputs": 5,
+      "notes": "Mesma regra do Roto: nunca gerar \"curves\"/strokes."
+    },
+    "Shuffle2": {
+      "arity_default": 1,
+      "knobs": [
+        "fromInput1",
+        "fromInput2",
+        "in1",
+        "in2",
+        "out1",
+        "out2",
+        "mappings"
+      ],
+      "mask_input": 1,
+      "max_inputs": 2,
+      "menu": "Shuffle",
+      "notes": "Shuffle moderno; o legado \"Shuffle\" nao deve ser gerado."
+    },
+    "Switch": {
+      "arity_default": 1,
+      "knobs": [
+        "which"
+      ],
+      "mask_input": 2,
+      "max_inputs": 10000,
+      "notes": "Aridade variavel: o Nuke sempre serializa o knob \"inputs N\" — gerar SEMPRE com o knob explicito."
+    },
+    "TimeOffset": {
+      "arity_default": 1,
+      "knobs": [
+        "time_offset",
+        "reverse_input"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1
+    },
+    "Transform": {
+      "arity_default": 1,
+      "knobs": [
+        "translate",
+        "rotate",
+        "scale",
+        "skewX",
+        "skewY",
+        "center",
+        "filter",
+        "clamp",
+        "black_outside",
+        "motionblur",
+        "shutter"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1
+    },
+    "Unpremult": {
+      "arity_default": 1,
+      "knobs": [
+        "channels",
+        "alpha"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1
+    },
+    "Write": {
+      "arity_default": 1,
+      "knobs": [
+        "file",
+        "file_type",
+        "channels",
+        "colorspace",
+        "raw",
+        "premultiplied",
+        "create_directories",
+        "first",
+        "last",
+        "use_limit"
+      ],
+      "mask_input": 1,
+      "max_inputs": 1,
+      "notes": "Knobs especificos de formato (datatype/compression/...) so existem apos definir file_type — nao gerar; deixar para o artista."
+    }
+  }
+}
