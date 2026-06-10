@@ -1153,8 +1153,10 @@ function parseNK(text){
         if (!im){ fatal(`${esc(cls)}: knob inputs "${esc(knobs.inputs)}" não reconhecido.`); break; }
         main = +im[1]; maskC = +(im[2] || 0);
       } else if (cls === 'Group'){
-        fatal(`Group <strong>${esc(String(knobs.name||''))}</strong> sem knob <code>inputs</code> — a aridade default de Group ainda não foi medida (pendência: extractors/probe_group_inputs.py). Adicione <code>inputs N</code> ao bloco para importar já.`);
-        break;
+        // MEDIDO (probe_group_inputs.py): Group sem knob consome 1 da
+        // pilha, independente do nº de Inputs internos (até com zero).
+        // A lei universal (sem knob = 1 para não-generators) vale aqui.
+        main = 1;
       } else if (NK_USER_INPUTS?.has(cls) && NK_USER_INPUTS.get(cls) != null){
         main = NK_USER_INPUTS.get(cls);   // aridade medida no Nuke do usuário
       } else if (cls in NK_INPUTS){
