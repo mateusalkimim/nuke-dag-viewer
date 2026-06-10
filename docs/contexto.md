@@ -95,7 +95,7 @@ Harness em Node: extrai as seções parser/export do HTML por regex (marcadores 
 ## Pendências / próximos passos possíveis
 
 - ~~Rodar `map_inputs_gui.py` e cruzar com a `NK_INPUTS`~~ **feito (v6)**: 40 divergências corrigidas, tabela reescrita com valores medidos, lei da aridade documentada acima. `Precomp:1` é o único valor extrapolado sem medição direta (expande como Group no copy/paste) — junto com as ~44 classes de versões antigas ausentes do menu 14.0v2 (extrapoladas pela lei).
-- Carregar o `inputs_default.json` em runtime no viewer (como o `nodes.json`): estenderia a cobertura de aridade aos gizmos não-Group do pipeline (ex.: `ABME_*.gizmo` mediram 0) sem pôr nomes do estúdio na tabela embutida.
+- ~~Carregar o `inputs_default.json` em runtime no viewer~~ **feito**: segundo upload ao lado do `nodes.json`. Prioridade de aridade: knob `inputs` do script → `NK_USER_INPUTS` (medido do usuário) → `NK_INPUTS` (embutida) → erro; valor `null` (medido como variável) continua erro pedindo knob explícito. O loader **valida âncoras no load** (Blur=1, Grade=1, Roto=1, Dot=1, Constant=0) e rejeita arquivos de medição quebrada — defesa contra o lixo que as v1–v3 do extractor produziam.
 - Atualizar o harness de teste: a cobertura "prioridade NK_USER" referia-se à aridade (`def`), que foi removida — revisar para cobrir a nova ordem (knob `inputs` → `NK_INPUTS` → erro citando min–max do `nodes.json`). Incluir fixture de regressão do caso Roto (cadeia do `nodes.txt`: `push $cut_paste_input` + Roto sem knob `inputs` consumindo o externo).
 - Usar `optionalInput` do dump para validar se `mask` declarado faz sentido por classe.
 - Mapeamento de 3 inputs sem mask é especial-caso de Keymix (B/A/mask); outras classes 3+ → erro de representabilidade.

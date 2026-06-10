@@ -157,7 +157,10 @@
     <button id="btnImport">Importar .nk → JSON</button>
     <label for="nodesFile" style="margin-top:6px">Tabela de nodes (nodes.json do seu Nuke)</label>
     <input type="file" id="nodesFile" accept=".json,application/json,text/plain">
-    <div id="nodesStatus">usando tabela embutida (~180 classes padrão)</div>
+    <div id="nodesStatus">usando tabela embutida (~200 classes padrão)</div>
+    <label for="inputsFile" style="margin-top:6px">Aridade medida (inputs_default.json)</label>
+    <input type="file" id="inputsFile" accept=".json,application/json,text/plain">
+    <div id="inputsStatus">usando só a tabela embutida — carregue para cobrir gizmos do pipeline</div>
   </aside>
 
   <div id="canvasWrap">
@@ -920,6 +923,13 @@ const NK_INPUTS = {
    - knobs: nomes válidos, para validar JSON autorado à mão */
 let NK_USER = null;
 
+/* Aridade default MEDIDA no Nuke do usuário (inputs_default.json, gerado
+   por extractors/map_inputs_gui.py). Cobre gizmos do pipeline que não
+   estão na tabela embutida. Prioridade: knob "inputs" do script →
+   NK_USER_INPUTS → NK_INPUTS → erro. Valor null = medido como aridade
+   variável/indeterminada → continua erro (pedindo knob explícito). */
+let NK_USER_INPUTS = null;
+
 if (typeof document !== 'undefined'){
   const statusEl = document.getElementById('nodesStatus');
   document.getElementById('nodesFile').addEventListener('change', async e => {
@@ -949,6 +959,51 @@ if (typeof document !== 'undefined'){
     } catch (err){
       NK_USER = null;
       statusEl.textContent = 'falha ao ler nodes.json: ' + err.message;
+    }
+  });
+
+  const inputsStatusEl = document.getElementById('inputsStatus');
+  document.getElementById('inputsFile').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      let text;                                            // tolera UTF-16 do PowerShell
+      if (buf[0]===0xFF && buf[1]===0xFE) text = new TextDecoder('utf-16le').decode(buf);
+      else if (buf[0]===0xFE && buf[1]===0xFF) text = new TextDecoder('utf-16be').decode(buf);
+      else text = new TextDecoder('utf-8').decode(buf);
+      const start = text.indexOf('{');
+      if (start < 0) throw new Error('nenhum JSON encontrado no arquivo');
+      const data = JSON.parse(text.slice(start));
+      if (!data || typeof data !== 'object' || Array.isArray(data))
+        throw new Error('formato inesperado (esperado {classe: aridade})');
+      const map = new Map();
+      for (const [cls, v] of Object.entries(data)){
+        if (v === null){ map.set(cls, null); continue; }
+        if (!Number.isInteger(v) || v < 0) throw new Error(`valor inválido para "${cls}": ${JSON.stringify(v)}`);
+        map.set(cls, v);
+      }
+      if (!map.size) throw new Error('nenhuma classe no JSON');
+      // Âncoras de verdade provada: rejeita arquivo gerado por método
+      // quebrado (as v1–v3 do extractor produziram exatamente esse lixo,
+      // e aridade errada não gera erro — gera grafo errado e plausível).
+      const anchors = { Blur:1, Grade:1, Roto:1, Dot:1, Constant:0 };
+      const missing = Object.keys(anchors).filter(c => !map.has(c));
+      if (missing.length)
+        throw new Error(`âncoras ausentes (${missing.join(', ')}) — gere o arquivo com extractors/map_inputs_gui.py`);
+      const bad = Object.entries(anchors)
+        .filter(([c, exp]) => map.get(c) !== exp)
+        .map(([c, exp]) => `${c}=${map.get(c)} (esperado ${exp})`);
+      if (bad.length)
+        throw new Error('âncoras com valor errado — medição não confiável: ' + bad.join(', '));
+      NK_USER_INPUTS = map;
+      const fixed = [...map.values()].filter(v => v != null).length;
+      const hint = document.getElementById('nkInput').value.trim()
+        ? ' Re-importe o .nk para aplicar.' : '';
+      inputsStatusEl.textContent =
+        `${map.size} classes medidas de ${f.name} (${fixed} com default fixo) — prioridade sobre a tabela embutida.${hint}`;
+    } catch (err){
+      NK_USER_INPUTS = null;
+      inputsStatusEl.textContent = 'falha ao ler inputs_default.json: ' + err.message;
     }
   });
 }
@@ -1059,14 +1114,19 @@ function parseNK(text){
         const im = String(knobs.inputs).match(/^(\d+)\s*(?:\+\s*(\d+))?$/);
         if (!im){ fatal(`${esc(cls)}: knob inputs "${esc(knobs.inputs)}" não reconhecido.`); break; }
         main = +im[1]; maskC = +(im[2] || 0);
+      } else if (NK_USER_INPUTS?.has(cls) && NK_USER_INPUTS.get(cls) != null){
+        main = NK_USER_INPUTS.get(cls);   // aridade medida no Nuke do usuário
       } else if (cls in NK_INPUTS){
         main = NK_INPUTS[cls];
+      } else if (NK_USER_INPUTS?.has(cls)){
+        fatal(`Classe <strong>${esc(cls)}</strong> medida como aridade <strong>variável/indeterminada</strong> no seu inputs_default.json e sem knob <code>inputs</code> no script — número de inputs consumidos da pilha é ambíguo. Adicione <code>inputs N</code> ao bloco.`);
+        break;
       } else if (NK_USER?.has(cls)){
         const u = NK_USER.get(cls);
         fatal(`Classe <strong>${esc(cls)}</strong> consta no seu nodes.json (inputs ${u.min}–${u.max}, contando opcionais) mas não está na tabela embutida e o script não traz o knob <code>inputs</code> — aridade default ambígua. Adicione <code>inputs N</code> ao bloco.`);
         break;
       } else {
-        fatal(`Classe <strong>${esc(cls)}</strong> desconhecida e sem knob <code>inputs</code> — número de inputs consumidos da pilha é ambíguo; não vou chutar. Adicione <code>inputs N</code> ao bloco, ou carregue o nodes.json gerado pelo script v2.`);
+        fatal(`Classe <strong>${esc(cls)}</strong> desconhecida e sem knob <code>inputs</code> — número de inputs consumidos da pilha é ambíguo; não vou chutar. Adicione <code>inputs N</code> ao bloco, ou carregue o <code>inputs_default.json</code> gerado pelo <code>extractors/map_inputs_gui.py</code> (aridade medida do seu Nuke).`);
         break;
       }
       if (maskC > 1){ fatal(`${esc(cls)}: inputs ${main}+${maskC} (múltiplas máscaras) não suportado.`); break; }
