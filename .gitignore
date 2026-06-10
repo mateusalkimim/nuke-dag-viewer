@@ -10,3 +10,4 @@ tests/fixtures/*
 
 # Artefatos de debug de sessao (screenshots de setups de producao)
 bugs/
+__pycache__/

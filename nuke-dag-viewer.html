@@ -824,11 +824,23 @@ document.getElementById('btnRender').onclick = () => doRender(false);
 
 const EXT = { ext: true };   // sentinela: conexão externa (cut_paste_input)
 
-// nº de inputs padrão por classe quando o knob "inputs" está ausente.
-// Cobertura: nodes padrão do Nuke, por categoria de menu. Nodes de aridade
-// VARIÁVEL (Switch, ContactSheet, AppendClip, JoinViews, Scene,
-// ScanlineRender, MergeGeo, CopyCat…) ficam FORA de propósito: o Nuke sempre
-// serializa o knob "inputs" neles; sem o knob, a contagem é ambígua → erro.
+// Aridade default por classe quando o knob "inputs" está AUSENTE no .nk.
+// MEDIDO no Nuke 14.0v2 (extractors/map_inputs_gui.py v6, oráculo do lado
+// do paste): bloco sem knob consome 0 (generators puros) ou 1 (todo o
+// resto) — NUNCA 2+. Merge2/Keymix/ChannelMerge etc. com 2+ inputs
+// conectados SEMPRE serializam o knob; um Merge sem knob tem só o B.
+// Classes de aridade variável (Switch, Scene, ScanlineRender...) também
+// medem 1 — na prática o Nuke sempre grava o knob nelas, então o valor
+// só importa em trechos editados à mão.
+// Valores EXTRAPOLADOS pela lei medida (classes de versões antigas,
+// ausentes do menu do 14.0v2): CheckerBoard, CurveTool, Text, Grain,
+// TimeWarp, OFlow2, OFlow, Kronos, Shuffle, ShuffleCopy, Toe, Exposure,
+// Crosstalk, Lin2Log, Bilateral, ZDefocus, Convolve, EdgeDetect, Glow,
+// Matrix, VectorBlur, Denoise, Primatte, IBKColourV3, IBKGizmoV3, Merge,
+// LensDistortion, Mirror, SphericalTransform, GridWarp2, Tracker3,
+// DeepRead, DeepColorCorrect, DeepHoldout, DeepToImage, DeepMerge,
+// Camera2, Axis2, Light2, ReadGeo, Card, Project3D, StickyNote e
+// Precomp (este não medível: expande como Group no copy/paste).
 // Gizmos/OFX (ex.: Keylight) são classes externas → erro pedindo "inputs N".
 const NK_INPUTS = {
   // Image
@@ -837,66 +849,64 @@ const NK_INPUTS = {
   // Draw
   Text2:1, Text:1, Ramp:1, Radial:1, Rectangle:1, Grid:1, Flare:1, Glint:1,
   Sparkles:1, Noise:1, Dither:1, DustBust:1, Grain2:1, Grain:1, ScannedGrain:1,
-  // Roto serializa 1 por default (input bg): provado por paste real — Roto
-  // desconectado ganha "inputs 0" explícito; com bg conectado o knob é omitido
-  // e o Nuke faz "push" do item consumido. RotoPaint: mesma família, suspeito
-  // de também ser 1 — pendente confirmar com map_inputs_gui.py.
-  Roto:1, RotoPaint:0, LightWrap:2,
+  Roto:1, RotoPaint:1, LightWrap:1,
   // Time
   FrameBlend:1, FrameHold:1, FrameRange:1, Retime:1, TemporalMedian:1,
   TimeBlur:1, TimeEcho:1, TimeOffset:1, TimeWarp:1, OFlow2:1, OFlow:1,
   Kronos:1, TimeClip:1, NoTimeBlur:1, SmartVector:1, VectorGenerator:1,
+  AppendClip:1,
   // Channel
-  Shuffle2:1, Shuffle:1, ShuffleCopy:2, Copy:2, ChannelMerge:2, Remove:1,
+  Shuffle2:1, Shuffle:1, ShuffleCopy:1, Copy:1, ChannelMerge:1, Remove:1,
   // Color
   Add:1, Multiply:1, Gamma:1, Clamp:1, ClipTest:1, Invert:1, Saturation:1,
   HueShift:1, HueCorrect:1, HueKeyer:1, ColorCorrect:1, ColorLookup:1, Grade:1,
   Toe2:1, Toe:1, Posterize:1, SoftClip:1, EXPTool:1, Exposure:1, Crosstalk:1,
-  ColorMatrix:1, ColorTransfer:2, MatchGrade:2, MinColor:1, Histogram:1,
+  ColorMatrix:1, ColorTransfer:1, MatchGrade:1, MinColor:1, Histogram:1,
   HistEQ:1, Colorspace:1, Log2Lin:1, Lin2Log:1, PLogLin:1, Vectorfield:1,
-  GenerateLUT:1, CMSTestPattern:0, Expression:1, MergeExpression:2,
+  GenerateLUT:1, CMSTestPattern:0, Expression:1, MergeExpression:1,
   OCIOColorSpace:1, OCIOCDLTransform:1, OCIODisplay:1, OCIOFileTransform:1,
   OCIOLogConvert:1, OCIOLookTransform:1, OCIONamedTransform:1,
   // Filter
-  Blur:1, Bilateral:1, Defocus:1, ZDefocus2:1, ZDefocus:1, Convolve2:2,
-  Convolve:2, EdgeBlur:1, EdgeDetect:1, Emboss:1, Erode:1, FilterErode:1,
+  Blur:1, Bilateral:1, Defocus:1, ZDefocus2:1, ZDefocus:1, Convolve2:1,
+  Convolve:1, EdgeBlur:1, EdgeDetect:1, Emboss:1, Erode:1, FilterErode:1,
   Dilate:1, Glow2:1, Glow:1, GodRays:1, Laplacian:1, Matrix:1, Median:1,
   Sharpen:1, Soften:1, VolumeRays:1, MotionBlur:1, VectorBlur2:1, VectorBlur:1,
-  DirBlurWrapper:1, Denoise2:1, Denoise:1, DropShadow:2,
+  DirBlurWrapper:1, Denoise2:1, Denoise:1, DropShadow:1,
   // Keyer
-  Keyer:1, Difference:2, Primatte3:2, Primatte:2, IBKColourV3:1, IBKGizmoV3:3,
-  ChromaKeyer:1, Cryptomatte:1, Encryptomatte:2,
+  Keyer:1, Difference:1, Primatte3:1, Primatte:1, IBKColourV3:1, IBKGizmoV3:1,
+  ChromaKeyer:1, Cryptomatte:1, Encryptomatte:1,
   // Merge
-  Merge2:2, Merge:2, Keymix:3, CopyBBox:2, CopyRectangle:2, Dissolve:2,
-  LayerContactSheet:1, Premult:1, Unpremult:1, AddMix:2, ZMerge:2,
+  Merge2:1, Merge:1, Keymix:1, CopyBBox:1, CopyRectangle:1, Dissolve:1,
+  LayerContactSheet:1, Premult:1, Unpremult:1, AddMix:1, ZMerge:1,
+  Switch:1, ContactSheet:1,
   // Transform
   Transform:1, TransformMasked:1, Card3D:1, CornerPin2D:1, Crop:1, IDistort:1,
   LensDistortion2:1, LensDistortion:1, Mirror2:1, Mirror:1, Position:1,
   Reformat:1, SphericalTransform:1, SplineWarp3:1, GridWarp3:1, GridWarp2:1,
-  Tracker4:1, Tracker3:1, Stabilize2D:1, AdjBBox:1, BlackOutside:1, STMap:2,
-  VectorDistort:2, Reconcile3D:3, PointsTo3D:1,
+  Tracker4:1, Tracker3:1, Stabilize2D:1, AdjBBox:1, BlackOutside:1, STMap:1,
+  VectorDistort:1, Reconcile3D:1, PointsTo3D:1,
   // Views / Stereo
-  OneView:1, MixViews:2, ShuffleViews:1, Anaglyph:1, SideBySide:2,
+  OneView:1, MixViews:1, ShuffleViews:1, Anaglyph:1, SideBySide:1, JoinViews:1,
   // Deep
   DeepRead:0, DeepWrite:1, DeepColorCorrect:1, DeepCrop:1, DeepExpression:1,
-  DeepFromFrames:1, DeepFromImage:1, DeepHoldout:2, DeepRecolor:2,
-  DeepReformat:1, DeepSample:1, DeepToImage:1, DeepToPoints:2, DeepTransform:1,
-  DeepMerge:2,
+  DeepFromFrames:1, DeepFromImage:1, DeepHoldout:1, DeepRecolor:1,
+  DeepReformat:1, DeepSample:1, DeepToImage:1, DeepToPoints:1, DeepTransform:1,
+  DeepMerge:1,
   // MetaData
-  ModifyMetaData:1, ViewMetaData:1, CompareMetaData:2, CopyMetaData:2,
+  ModifyMetaData:1, ViewMetaData:1, CompareMetaData:1, CopyMetaData:1,
   AddTimeCode:1,
-  // 3D (principais; os variáveis serializam "inputs" sozinhos)
-  Camera3:0, Camera2:0, Camera:0, Axis3:0, Axis2:0, Light3:0, Light2:0,
-  Light:0, Spotlight:0, DirectLight:0, Environment:0, ReadGeo2:0, ReadGeo:0,
+  // 3D
+  Camera3:1, Camera2:1, Camera:1, Axis3:1, Axis2:1, Light3:1, Light2:1,
+  Light:1, Spotlight:1, DirectLight:1, Environment:1, ReadGeo2:1, ReadGeo:1,
   WriteGeo:1, Card2:1, Card:1, Cube:1, Sphere:1, Cylinder:1, TransformGeo:1,
-  DisplaceGeo:1, UVProject:2, Project3D2:2, Project3D:2, ApplyMaterial:2,
+  DisplaceGeo:1, UVProject:1, Project3D2:1, Project3D:1, ApplyMaterial:1,
   BasicMaterial:1, Phong:1, Emission:1, Diffuse:1, Specular:1, Normals:1,
-  EditGeo:1, GeoSelect:1,
+  EditGeo:1, GeoSelect:1, Scene:1, ScanlineRender:1, MergeGeo:1,
   // ML / AIR
-  Inference:1, Upscale:1, Deblur:1,
+  Inference:1, Upscale:1, Deblur:1, CopyCat:1,
   // Other
   Dot:1, NoOp:1, PostageStamp:1, StickyNote:0, Input:0, Output:1, DiskCache:1,
-  Precomp:0, Assert:1
+  Precomp:1, Assert:1
 };
 
 /* Tabela carregada em runtime do nodes.json do Nuke do usuário.
@@ -1078,7 +1088,7 @@ function parseNK(text){
         }
         inputs[label] = v;
       };
-      if (main === 1){ assign(popped[0], 'input'); }
+      if (main === 1){ assign(popped[0], isMergeClass(cls) ? 'B' : 'input'); }  // Merge sem knob = só o B conectado
       else if (main === 2){ assign(popped[0], 'B'); assign(popped[1], 'A'); }
       else if (main === 3 && cls === 'Keymix' && !maskC){
         assign(popped[0], 'B'); assign(popped[1], 'A'); assign(popped[2], 'mask');
