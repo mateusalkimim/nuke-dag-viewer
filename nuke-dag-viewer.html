@@ -161,6 +161,9 @@
     <label for="inputsFile" style="margin-top:6px">Aridade medida (inputs_default.json)</label>
     <input type="file" id="inputsFile" accept=".json,application/json,text/plain">
     <div id="inputsStatus">usando só a tabela embutida — carregue para cobrir gizmos do pipeline</div>
+    <label for="colorsFile" style="margin-top:6px">Cores do Node Graph (colors_default.json)</label>
+    <input type="file" id="colorsFile" accept=".json,application/json,text/plain">
+    <div id="colorsStatus">usando paleta embutida por categoria</div>
   </aside>
 
   <div id="canvasWrap">
@@ -209,7 +212,12 @@ const COLOR_RULES = [
   [/blur|defocus|erode|dilate|filter|median|sharpen|soften|edge/i,   '#7a4f9e'], // roxo
   [/read|constant|checkerboard|plate/i,                              '#6b6b6b'], // cinza
 ];
-const colorFor = cls => (COLOR_RULES.find(([re]) => re.test(cls)) || [0,'#555555'])[1];
+/* Cores medidas do Nuke do usuário (colors_default.json, gerado por
+   extractors/map_colors_gui.py) — prioridade sobre a paleta embutida.
+   null/ausente cai nas COLOR_RULES por categoria. */
+let NK_USER_COLORS = null;
+const colorFor = cls => NK_USER_COLORS?.get(cls)
+  || (COLOR_RULES.find(([re]) => re.test(cls)) || [0,'#555555'])[1];
 const textColorFor = hex => {
   const n = parseInt(hex.slice(1),16);
   const L = .2126*(n>>16&255) + .7152*(n>>8&255) + .0722*(n&255);
@@ -1013,6 +1021,38 @@ if (typeof document !== 'undefined'){
     } catch (err){
       NK_USER_INPUTS = null;
       inputsStatusEl.textContent = 'falha ao ler inputs_default.json: ' + err.message;
+    }
+  });
+
+  const colorsStatusEl = document.getElementById('colorsStatus');
+  document.getElementById('colorsFile').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      let text;                                            // tolera UTF-16 do PowerShell
+      if (buf[0]===0xFF && buf[1]===0xFE) text = new TextDecoder('utf-16le').decode(buf);
+      else if (buf[0]===0xFE && buf[1]===0xFF) text = new TextDecoder('utf-16be').decode(buf);
+      else text = new TextDecoder('utf-8').decode(buf);
+      const start = text.indexOf('{');
+      if (start < 0) throw new Error('nenhum JSON encontrado no arquivo');
+      const data = JSON.parse(text.slice(start));
+      if (!data || typeof data !== 'object' || Array.isArray(data))
+        throw new Error('formato inesperado (esperado {classe: "#rrggbb"})');
+      const map = new Map();
+      for (const [cls, v] of Object.entries(data)){
+        if (v === null) continue;                  // sem cor específica: paleta embutida
+        if (typeof v !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(v))
+          throw new Error(`cor inválida para "${cls}": ${JSON.stringify(v)}`);
+        map.set(cls, v.toLowerCase());
+      }
+      if (!map.size) throw new Error('nenhuma cor no JSON');
+      NK_USER_COLORS = map;
+      colorsStatusEl.textContent = `${map.size} cores de ${f.name} — nós pintados como no seu Node Graph.`;
+      if (MODEL) doRender(false);                  // repinta na hora
+    } catch (err){
+      NK_USER_COLORS = null;
+      colorsStatusEl.textContent = 'falha ao ler colors_default.json: ' + err.message;
+      if (MODEL) doRender(false);
     }
   });
 }
