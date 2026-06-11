@@ -117,7 +117,8 @@ diário de "como saber se isto é verdade ou artefato".
 
 Há um workstream paralelo para ensinar um LLM a **gerar** `.nk` válido usando o
 catálogo medido do projeto — com o viewer atuando como motor de layout e
-validador no loop de correção. O material vive em [`llm/`](llm/):
+validador no loop de correção. O material vive em [`prompts/`](prompts/)
+(o prompt em si) e [`llm/`](llm/) (workstream e gerador do catálogo):
 
 - [`prompts/core.md`](prompts/core.md) + [`prompts/catalog.json`](prompts/catalog.json)
   — o system prompt v0 (dialeto TCL, erro>chute, elicitação, correção) e a
@@ -133,7 +134,9 @@ validador no loop de correção. O material vive em [`llm/`](llm/):
 
 Decisões do dialeto (conexões sempre explícitas, modelo não gera posições,
 bloco único, JSON canônico como entrada de refino) e o schema completo do
-feedback em [`llm/README.md`](llm/README.md).
+feedback em [`llm/README.md`](llm/README.md). Montagem do prompt nos três
+modos de consumo (system prompt de chat, skill carregável, anexo frio em
+serviço online) em [`prompts/README.md`](prompts/README.md).
 
 ## Compatibilidade
 
