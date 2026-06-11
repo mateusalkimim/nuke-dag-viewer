@@ -1,7 +1,7 @@
 # build_mvp_subset.py
 # Uso: python3 llm/build_mvp_subset.py   (da raiz do repo)
 #
-# Gera llm/mvp_subset.json: a referencia CURADA de classes/knobs para o
+# Gera prompts/catalog.json: a referencia CURADA de classes/knobs para o
 # system prompt de geracao de .nk (LLM). A curadoria (quais knobs
 # importam por classe) e' editorial e vive no dict CURATION abaixo; a
 # VALIDACAO e' programatica e inegociavel:
@@ -28,7 +28,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 NODES = os.path.join(HERE, "..", "data", "nodes.json")
 INPUTS = os.path.join(HERE, "..", "data", "inputs_default.json")
-OUT = os.path.join(HERE, "mvp_subset.json")
+OUT = os.path.join(HERE, "..", "prompts", "catalog.json")
 
 KEYLIGHT = "OFXuk.co.thefoundry.keylight.keylight_v201"
 

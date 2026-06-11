@@ -5,8 +5,8 @@ Nuke) válido, usando o catálogo medido do projeto.
 
 | Arquivo | O que é |
 |---|---|
-| `build_mvp_subset.py` | gera o subset curado a partir de `data/nodes.json` + `data/inputs_default.json`. A curadoria (quais knobs importam por classe) é editorial e vive no script; **toda entrada é validada contra o catálogo real** — classe inexistente ou knob com nome errado aborta com sugestão por proximidade. |
-| `mvp_subset.json` | o subset gerado: 33 classes que cobrem ~80% de comp, ~2k tokens — cabe inline no prompt. Versionado porque só contém classes padrão do Nuke (nenhum dado de pipeline). |
+| `build_mvp_subset.py` | gera o subset curado (→ `prompts/catalog.json`) a partir de `data/nodes.json` + `data/inputs_default.json`. A curadoria (quais knobs importam por classe) é editorial e vive no script; **toda entrada é validada contra o catálogo real** — classe inexistente ou knob com nome errado aborta com sugestão por proximidade. |
+| [`prompts/catalog.json`](../prompts/catalog.json) | o subset gerado: 33 classes que cobrem ~80% de comp, ~2k tokens — cabe inline no prompt. Versionado porque só contém classes padrão do Nuke (nenhum dado de pipeline). |
 
 ## Campos por classe
 
@@ -68,7 +68,20 @@ Tipos de erro: `unknown_class`, `unknown_knob`*, `ambiguous_arity`,
 `dot_dangling`. (*`unknown_knob` é warning — knob errado não quebra a
 topologia, mas o LLM deve corrigir.)
 
-Regenerar após atualizar os dumps de `data/`:
+## Fora da v0 (deliberado)
+
+- **Classes além das 33** (Cryptomatte, ZDefocus2, Denoise2…): escopo MVP — expandir a curadoria do build script quando casos reais pedirem; o protocolo erro>chute já cobre a lacuna com dignidade.
+- **Defaults/tipos dos knobs no catálogo**: o `nodes.json` só tem *nomes*; tipos/defaults exigiriam novo extractor. O modelo usa conhecimento geral para valores e o validador pega nomes errados.
+- **Geração de Groups/gizmos**: o viewer só os lê como opacos; gerar exigiria semântica de corpo (Input/Output/end_group) — risco alto, valor baixo na v0.
+- **Expressões TCL em knobs** (`{frame*2}`, links): alto risco de inválido sem validação dedicada.
+- **Canais/layers customizados** (`add_layer`): o parser tolera, a geração não cobre.
+- **Diffs no refino**: bloco substitutivo completo é menos eficiente em tokens, mas elimina a classe inteira de erros de merge parcial.
+- **Checklist de auto-verificação no prompt** (recontar pushes vs `inputs N` antes de responder): candidata forte para v1 se os casos de aceitação revelarem erros de contagem.
+- **Backdrops/anotações didáticas no grafo**: o aprendizado na v0 vem da seção Raciocínio; backdrops via JSON ficam para v1.
+
+O system prompt em si vive em [`prompts/`](../prompts/) (`core.md` + `catalog.json` + casos de aceitação).
+
+Regenerar o catálogo após atualizar os dumps de `data/`:
 
 ```sh
 python3 llm/build_mvp_subset.py

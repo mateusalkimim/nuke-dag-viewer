@@ -92,9 +92,12 @@ extractors/               scripts que extraem metadados do SEU Nuke
   map_inputs_gui.py         aridade default por classe (paste-oráculo)
   map_colors_gui.py         cor de tile por classe
   probe_group_inputs.py     diagnóstico pontual da aridade de Group
-llm/                      geração de .nk por LLM
-  build_mvp_subset.py       subset curado validado contra o catálogo
-  mvp_subset.json           33 classes / ~2k tokens, inline em prompt
+llm/                      workstream de geração de .nk por LLM
+  build_mvp_subset.py       gera o subset curado -> prompts/catalog.json
+prompts/                  system prompt do gerador (v0)
+  core.md                   regras: dialeto, erro>chute, elicitação (~1,1k tok)
+  catalog.json              33 classes / ~2k tokens, inline em prompt
+  acceptance.md             3 casos de aceitação
 data/                     dumps gerados (locais, fora do git)
 tests/fixtures/           trechos .nk reais (locais, fora do git)
 ```
@@ -116,10 +119,12 @@ Há um workstream paralelo para ensinar um LLM a **gerar** `.nk` válido usando 
 catálogo medido do projeto — com o viewer atuando como motor de layout e
 validador no loop de correção. O material vive em [`llm/`](llm/):
 
-- [`mvp_subset.json`](llm/) — referência curada de 33 classes (~80% de comp,
-  ~2k tokens, cabe inline num prompt), gerada por `build_mvp_subset.py` e
-  **validada contra o catálogo real** (classe/knob inexistente aborta com
-  did-you-mean).
+- [`prompts/core.md`](prompts/core.md) + [`prompts/catalog.json`](prompts/catalog.json)
+  — o system prompt v0 (dialeto TCL, erro>chute, elicitação, correção) e a
+  referência curada de 33 classes (~80% de comp, ~2k tokens), gerada por
+  `llm/build_mvp_subset.py` e **validada contra o catálogo real** (classe/knob
+  inexistente aborta com did-you-mean). Casos de aceitação em
+  [`prompts/acceptance.md`](prompts/acceptance.md).
 - **Feedback estruturado** — o botão **Feedback LLM** no header devolve um JSON
   `{ok, stage, errors, warnings}` do último import/render, com sugestões por
   proximidade (classe e knob) e a lista de knobs válidos da classe que falhou.
